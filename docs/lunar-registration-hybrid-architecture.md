@@ -1,404 +1,263 @@
-# Hybrid Hierarchical Lunar Image Registration Architecture
+# LunaReg: Illumination-Aware Lunar Image Registration — Architecture v3
 
-## 1. Combined technical architecture
+SIH 2026 · Problem Statement ID 26166 · Team LUNATIQ22719 (Team ID 122202)
 
-The recommended system is a hybrid hierarchical registration pipeline:
+> Multi-modal, sun-angle- and scale-invariant image correspondence between Chandrayaan-2 optical images (OHRC, TMC-2, IIRS) and lunar reference images (LRO NAC, SELENE TC), with sub-pixel accuracy and uniformly distributed match points.
 
-- Metadata provides coarse geographic and scale constraints.
-- Natural landmark detection provides interpretable, stable structural features.
-- Graph/constellation matching estimates a reliable coarse transformation.
-- LoFTR or LightGlue generates dense/fine correspondences within the reduced search area.
-- RANSAC, spatial selection, and sub-pixel refinement produce the final registration.
+## 0. What changed from v2
+
+| Area | v2 | v3 |
+| --- | --- | --- |
+| Landmark (crater) matching | Fallback only | **Core pillar**: always runs and provides the coarse alignment |
+| Illumination | Relighting from DEM as the main idea | **Closest-sun reference selection first**, then relighting only at DEM-supported resolution, or invariant features; shadow masking |
+| Resampling | Project, resample and orthorectify in separate steps | **One composed warp**, applied to the reference only; the source is resampled once, at the very end |
+| Pushbroom correction | Along-track polynomial or piecewise-affine, per tile | **Global line-dependent jitter model** fitted to all tie points; per-tile RANSAC only rejects outliers |
+| Hold-out | Mentioned at validation | **Split before any fitting**; checkpoints bypass RANSAC and model fitting entirely |
+| Failure handling | Not defined | **Fail → re-align via landmarks, or flag low confidence** |
+| Poles | Not handled | **Polar mode**: polar stereographic projection, shadow masking, shadow-edge matching |
+| Wording | "learned matcher" | "pre-trained feature-matching algorithm" (no model is trained by us) |
+
+## 1. Design principles
+
+1. **Two core ideas.** (a) Match the lighting; (b) match crater and landmark constellations. Everything else is standard, well-tested registration engineering.
+2. **The source image is never modified** until the single final warp. Only a temporary copy of the reference is relit or resampled.
+3. **One interpolation per image.** Geometric steps are composed into one transform before resampling, to avoid cascading interpolation artefacts.
+4. **The pipeline knows when it has failed.** Accuracy is measured on held-out checkpoints, never on the points used for fitting.
+5. **The DEM is optional and resolution-aware.** It helps where its resolution supports the matching scale; the pipeline still runs without it.
+
+## 2. Scope and sensor pairing
+
+Each Chandrayaan-2 source is paired with a reference of similar resolution, so no pair has more than about a 2× gap in native resolution (IIRS is the exception; only its reference is downsampled).
+
+| Source (Chandrayaan-2) | Source GSD | Reference | Reference GSD | Notes |
+| --- | --- | --- | --- | --- |
+| OHRC | ~0.25 m | LRO NAC | ~0.5 m | Hardest pair: sub-pixel on the source needs ~0.5 px on the NAC grid |
+| TMC-2 | ~5 m | SELENE TC | ~10 m | |
+| IIRS (PCA band) | ~80 m | SELENE TC, downsampled | ~10 m → 80 m | ~250 spectral bands reduced to one (first PCA component or best high-SNR band) |
+
+- Sub-pixel accuracy is always defined in **source pixels**.
+- Coarse stages run at a common pyramid level; fine refinement runs at source resolution.
+- Optional IIRS fallback: chained registration (IIRS → already-registered TMC-2), flagged in the report.
+
+## 3. Pipeline
 
 ```text
-OHRC / TMC / IIRS IMAGE + LRO NAC / SELENE REFERENCE
-                         |
-                         v
-1. DATA INGESTION
-   Image reading, metadata parsing, sensor identification,
-   coordinate system validation, invalid-pixel detection
-                         |
-                         v
-2. SENSOR-AWARE PREPROCESSING
-   Radiometric normalization, denoising, destriping, CLAHE,
-   gradient image, edge image, phase image, valid-pixel mask
-                         |
-                         v
-3. METADATA-BASED APPROXIMATE FOOTPRINT
-   Lunar coordinates, camera geometry, GSD, solar angles,
-   spacecraft position, DEM/orthorectification if available
-                         |
-                         v
-4. REFERENCE ROI EXTRACTION
-   Estimate overlap region, scale range, rotation range,
-   uncertainty margin, and valid search area
-                         |
-                         v
-5. MULTI-SCALE NATURAL LUNAR LANDMARK DETECTION
-   Craters and crater rims; ridges and linear forms;
-   valleys and depressions; albedo/edge boundaries;
-   rocks and boulders; texture patterns; terrain junctions;
-   shadow-aware structures
-                         |
-                         v
-6. STRUCTURAL FEATURE REPRESENTATION
-   Shape, scale, orientation, gradient, phase, local texture,
-   crater geometry, relative distances, angles, adjacency,
-   local spatial relationships, sensor-invariant descriptors
-                         |
-                         v
-7. SPATIAL CONSTELLATION / GRAPH MATCHING
-   Landmark graph construction -> candidate graph matching ->
-   geometric consistency filtering -> coarse transformation
-   Output: initial translation, rotation, scale, affine model,
-   candidate correspondence pairs, confidence score
-                         |
-                         v
-8. COARSE IMAGE-LEVEL REGISTRATION
-   Warp source image using similarity/affine transformation,
-   reduce residual search area, align image pyramids
-                         |
-                         v
-9. FINE CORRESPONDENCE GENERATION
-   Option A: LoFTR for detector-free dense matching
-   Option B: SuperPoint + LightGlue for sparse robust matching
-   Option C: Both, with confidence-based result fusion
-                         |
-                         v
-10. MULTI-SOURCE CORRESPONDENCE FUSION
-    Combine graph matches, LoFTR/LightGlue matches, descriptor
-    confidence, geometric consistency, and local image quality
-                         |
-                         v
-11. ROBUST GEOMETRIC ESTIMATION
-    Similarity -> affine -> homography -> local deformation model
-    RANSAC/MAGSAC, reprojection-error filtering, model scoring
-                         |
-                         v
-12. SPATIALLY UNIFORM MATCH SELECTION
-    Grid-based selection, Poisson-disk sampling, confidence
-    ranking, minimum separation, coverage optimization
-                         |
-                         v
-13. SUB-PIXEL REFINEMENT
-    Local NCC, phase correlation, Lucas-Kanade, multi-channel
-    patch optimization, uncertainty estimation
-                         |
-                         v
-14. FINAL REGISTRATION AND VALIDATION
-    Final warp, optional local deformation correction,
-    held-out validation, residual vector analysis
-                         |
-                         v
+INPUTS
+  CH-2 source (OHRC / TMC-2 / IIRS, PDS4 + metadata)
+  Reference candidates (LRO NAC / SELENE TC, many acquisitions)
+  Optional lunar DEMs (SLDEM2015, LOLA incl. polar DEMs, TMC-2 / NAC DTMs)
+                              |
+                              v
+1. INGEST & METADATA
+   PDS4 read; sun azimuth/elevation, footprint, GSD, invalid-pixel mask;
+   IIRS band reduction (PCA / best band)
+                              |
+                              v
+2. ROI FROM FOOTPRINTS
+   Overlap region + uncertainty margin; crop BEFORE heavy processing
+                              |
+                              v
+3. CLOSEST-SUN REFERENCE SELECTION
+   Choose the reference acquisition whose sun azimuth/elevation best
+   matches the source  -> removes much of the lighting gap up front
+                              |
+                              v
+4. ONE COMPOSED WARP (reference only)
+   Map projection + orthorectification composed into a single transform
+   into the SOURCE geometry; one Lanczos resampling. Source untouched.
+   Polar mode (|lat| > ~70 deg): polar stereographic projection
+                              |
+                              v
+5. TILING & PYRAMIDS
+   Large OHRC scenes split into tiles; multi-resolution levels
+                              |
+                              v
+6. ILLUMINATION HANDLING                         <-- CORE IDEA 1
+   6a. If DEM resolution supports the current pyramid level:
+       relight a COPY of the reference under the source sun vector
+   6b. Otherwise: illumination-invariant representations
+       (phase congruency, gradient orientation mod pi)
+   6c. Shadow masking: cast shadows + permanently shadowed regions excluded
+   6d. Polar extra (future work): shadow-edge matching vs DEM ray-cast shadows
+                              |
+                              v
+7. LANDMARK CONSTELLATION MATCHING               <-- CORE IDEA 2
+   Detect craters, ridges, terrain junctions (rim-shape check rejects
+   shadow artefacts) -> constellation graph -> crater-triangle matching
+   (distance ratios + angles) + RANSAC -> coarse similarity transform
+   + confidence; verified by phase correlation
+                              |
+                              v
+8. TILED LoFTR MATCHING
+   Pre-trained feature-matching algorithm, guided by the coarse transform
+   (small search window per tile); optional LightGlue branch
+                              |
+                              v
+9. SPLIT 20% HOLD-OUT CHECKPOINTS  -----------------------------+
+   Set aside BEFORE any fitting                                 |
+                              |                                 |
+                              v                                 |
+10. RANSAC / MAGSAC                                             |
+    Per-tile, loose threshold: outlier rejection only           |
+                              |                                 |
+                              v                                 |
+11. UNIFORM GRID SELECTION                                      |
+    Best match per grid cell, minimum separation                |
+                              |                                 |
+                              v                                 |
+12. SUB-PIXEL REFINEMENT                                        |
+    Phase correlation on invariant / relit patches              |
+                              |                                 |
+                              v                                 |
+13. GLOBAL PUSHBROOM JITTER MODEL                               |
+    Smooth function of image line fitted to ALL tie points      |
+    (regularised polynomial / few sinusoids) + residual filter  |
+                              |                                 |
+                              v                                 |
+14. VALIDATION  <-----------------------------------------------+
+    RMSE / median / CE90 on held-out checkpoints
+        FAIL -> re-align via landmarks (step 7) or flag low confidence
+        PASS -> 15
+                              |
+                              v
+15. FINAL WARP
+    Source resampled ONCE onto the reference grid
+                              |
+                              v
 OUTPUTS
-    Registered image; source/reference match points;
-    sub-pixel coordinates; transformation matrix/model;
-    residual vector field; RMSE and median error;
-    inlier count and ratio; spatial coverage and uniformity;
-    confidence map and processing report
+    Registered GeoTIFF | sub-pixel match points (CSV: source/reference
+    coords, confidence) | transformation + jitter model | residual vector
+    field | RMSE, median, CE90 | inlier count & ratio | spatial coverage &
+    uniformity | per-point confidence map | processing report
 ```
 
-## 2. Why the combination is better
+## 4. Core idea 1: illumination handling
 
-### The semantic architecture
+**Closest-sun reference selection.** LRO NAC has imaged most regions, and the poles especially, many times under different sun geometries. Picking the reference whose sun azimuth and elevation are closest to the source often removes most of the lighting difference before any modelling.
 
-Natural landmark and graph-based reasoning avoids depending entirely on pixel intensity. Useful structures include:
-
-- Crater rim geometry
-- Ridge orientation
-- Valley intersections
-- Relative distances
-- Local spatial arrangements
-- Terrain topology
-
-These features can remain recognizable despite differences in sun angle, sensor type, contrast, spectral response, and image resolution.
-
-### The registration architecture
-
-The engineering stages add:
-
-- Sensor-specific preprocessing
-- Multi-scale matching
-- Learned fine correspondence
-- Outlier removal
-- Uniform point distribution
-- Sub-pixel refinement
-- Quantitative validation
-- Operational output products
-
-Together, the architecture is both scientifically meaningful and computationally implementable.
-
-## 3. LoFTR and LightGlue
-
-LoFTR and LightGlue should be treated as alternative or complementary fine-matching strategies rather than mandatory sequential modules.
-
-### Option A: LoFTR branch
-
-```text
-Coarsely aligned images -> LoFTR -> Dense or semi-dense fine correspondences
-```
-
-LoFTR is useful when there are few reliable keypoints, weak texture, significant viewpoint or appearance variation, or a need for dense correspondences.
-
-### Option B: LightGlue branch
-
-```text
-Coarsely aligned images -> SuperPoint / SIFT / DISK -> LightGlue -> Sparse high-confidence correspondences
-```
-
-LightGlue is useful when stable keypoints can be detected, sparse high-confidence matches are sufficient, and computational efficiency is important.
-
-### Recommended approach
-
-```text
-Graph-based landmarks
-        |
-        +--> LoFTR branch
-        |
-        +--> LightGlue branch
-                |
-                v
-      Confidence and geometry-based fusion
-```
-
-Use the combined ensemble:
+**Relighting (when the DEM supports it).** A copy of the reference is re-shaded under the source's sun vector:
 
 $$
-M_{\text{final}} = M_{\text{graph}} \cup M_{\text{LoFTR}} \cup M_{\text{LightGlue}}
+I_{\text{relit}}(x,y) = \max\big(0,\; \mathbf{n}(x,y)\cdot\mathbf{s}_{\text{source}}\big)\cdot \rho(x,y)
 $$
 
-Remove duplicates and retain only geometrically consistent matches before RANSAC.
+where $\mathbf{n}$ is the surface normal from the DEM, $\mathbf{s}_{\text{source}}$ is the source sun direction and $\rho$ is the reference albedo. Cast shadows are added by ray-casting along the sun elevation.
 
-## 4. Role of each feature type
+**Resolution constraint.** Global DEMs cannot predict metre-scale shadows. SLDEM2015 is ~60 m/px, TMC-2 DTMs ~10 m, and LOLA polar DEMs ~5–20 m. Relighting is therefore applied only at pyramid levels the DEM supports: full resolution for TMC-2 and IIRS, coarse levels only for OHRC. Site-specific high-resolution DTMs (e.g. LROC NAC stereo DTMs) are used where available.
 
-### Tier 1: Most reliable
+**Illumination-invariant representations (otherwise).**
+- Phase congruency: structure and edges independent of contrast.
+- Gradient orientation mod π: survives brightness reversal when a slope is lit from opposite sides.
 
-- Crater centers
-- Crater rims
-- Large crater intersections
-- Ridge junctions
-- Valley junctions
-- Large-scale terrain boundaries
-- Stable albedo boundaries
+**Shadow masking.** Cast shadows and permanently shadowed regions carry no usable signal and are excluded from matching; spatial uniformity is then reported over the lit area only.
 
-These should drive the coarse transformation.
+## 5. Core idea 2: landmark constellation matching
 
-### Tier 2: Moderately reliable
+Crater geometry is stable under any lighting, and relative positions between craters are invariant to scale and rotation. This stage always runs and provides the coarse alignment.
 
-- Smaller crater rims
-- Ridge segments
-- Valley segments
-- Terrain texture patterns
-- Boulder fields
-
-These are useful for fine matching and local refinement.
-
-### Tier 3: Potentially unreliable
-
-- Individual rocks
-- Small boulders
-- Shadow boundaries
-- Isolated bright or dark spots
-
-These can change significantly with sun angle, resolution, sensor response, and viewing direction. They should not be primary landmarks unless confidence is high.
-
-## 5. Landmark graph representation
-
-Represent each image as a graph:
+- **Detection:** craters (classical Hough / contour methods with a rim-shape check that rejects shadow-only artefacts), ridges and terrain junctions. Shortcut: detect craters in the source only and match them against the published global lunar crater catalogue (Robbins 2019) for the reference area.
+- **Constellation graph:** landmarks as nodes; for landmarks $v_i, v_j, v_k$:
 
 $$
-G = (V,E)
+r_{ij} = \frac{d(v_i,v_j)}{d(v_i,v_k)}, \qquad \theta_{ijk} = \angle\big(v_i-v_j,\; v_k-v_j\big)
 $$
 
-where $V$ represents detected landmarks and $E$ represents relationships between landmarks.
+- **Matching:** crater triangles with consistent ratios and angles vote for a similarity transform (RANSAC), in the same way star trackers match star patterns.
+- **Check:** the transform is verified by phase correlation, which also gives a confidence score.
+- **Role:** crater centroids are accurate to a few pixels, so they **guide** the fine matcher and are **not** mixed into the final sub-pixel fit.
 
-Each node can contain:
+Feature tiers:
+- **Tier 1** (large craters, junctions, large terrain boundaries): constellation matching.
+- **Tier 2** (smaller craters, ridge segments, texture): left to the fine feature-matching algorithm.
+- **Tier 3** (rocks, small boulders, shadow edges): not used as landmarks.
 
-```text
-Node:
-    x, y
-    landmark_type
-    scale
-    orientation
-    shape_descriptor
-    confidence
-    local_texture_descriptor
-```
+Feature-poor maria: landmarks extend beyond craters (ridges, rilles, albedo boundaries), and the detector-free LoFTR matcher handles low texture.
 
-Each edge can contain:
+## 6. Transformation and distortion model
 
-```text
-Edge:
-    distance_between_nodes
-    relative_angle
-    orientation_difference
-    landmark_type_pair
-    local terrain relationship
-```
+Hierarchy: similarity → affine → affine + global pushbroom jitter model.
 
-For three landmarks $v_i, v_j, v_k$, use geometric invariants such as:
+- **No homography.** It assumes a planar scene seen through a frame camera; after orthorectification that assumption doesn't hold.
+- **Global jitter model.** OHRC and TMC-2 are pushbroom (line-scanning) cameras. Spacecraft jitter depends only on image line (time) and is the same across all columns, while terrain parallax depends on elevation and is removed by orthorectification. Jitter is therefore fitted as one regularised smooth function of line number using all tie points, not tile by tile, to avoid overfitting terrain differences.
+- **Model selection:** the simplest model whose held-out error is acceptable; AIC/BIC as a tiebreaker.
 
-$$
-r_{ij} = \frac{d(v_i,v_j)}{d(v_i,v_k)}
-$$
+## 7. Challenges and strategies
 
-and
+| Type | Challenge | Strategy |
+| --- | --- | --- |
+| Sun angle | Shadows flip, features change | Closest-sun reference, relighting at DEM-supported scale, invariant features |
+| Sun angle | Shadows mimic or hide craters | Rim-shape check at multiple scales; reject shadow-only detections |
+| Viewpoint | Camera tilt and terrain relief | Orthorectification in one composed warp (single resampling) |
+| Viewpoint | Pushbroom jitter distortion | Global line-dependent jitter model; RANSAC only rejects outliers |
+| Scale | >100× resolution range across sensors | Sensor-matched references (~2× gap per pair), reference-only resampling, pyramids |
+| Scale | Unknown scale / rotation | Crater constellation distance ratios and angles (invariant) |
+| Polar | Low sun, permanent shadows | Closest-sun reference, shadow masking, polar stereographic, shadow-edge matching (future) |
+| Data | Feature-poor maria | Landmarks beyond craters (ridges, rilles) + detector-free LoFTR |
+| Data | Matchers built for Earth images | Validate LoFTR on synthetic relit lunar pairs; classical matching as fallback |
+| Data | No DEM for a scene | DEM is optional; invariant features only |
 
-$$
-\theta_{ijk} = \angle(v_i-v_j,\;v_k-v_j)
-$$
+## 8. Validation and evaluation
 
-These ratios and angles are more robust to scale and rotation than raw image coordinates.
+**Ground truth**
+1. **Synthetic pairs:** real or simulated terrain, a known transform, and relighting at a different sun angle. Error is measured against the known transform; this is the direct evidence for sub-pixel accuracy.
+2. **Held-out checkpoints:** a random 20% of matches, split before fitting and used only for error measurement.
+3. **Manual checkpoints:** a small set of hand-picked point pairs on real images.
 
-A graph match is valid when:
+**Metrics:** RMSE, median error and CE90 on checkpoints · inlier count and ratio · spatial uniformity (% of grid cells with a match, convex-hull area ratio) · runtime per pair.
 
-- Landmark types are compatible.
-- Relative distances are consistent.
-- Relative angles are consistent.
-- The resulting transformation agrees with neighboring matches.
+**Stratified results:** by sun-angle difference (0–15°, 15–45°, >45°), by sensor pair, and polar vs non-polar.
 
-## 6. Recommended matching logic
+**Early evidence (synthetic demo):** on simulated cratered terrain lit from opposite sides, SIFT + RANSAC found **0 correct matches out of 41 candidates**; after relighting the reference to the source sun, it found **444 correct matches**, spread across the image. With a deliberately degraded (smoothed + noisy) DEM, the relit case still gave 43 correct matches.
 
-1. Detect semantic and structural landmarks.
-2. Construct source and reference landmark graphs.
-3. Match graph constellations using scale- and rotation-invariant relations.
-4. Estimate the initial similarity or affine transformation.
-5. Warp the source image approximately.
-6. Run LoFTR and/or LightGlue in the reduced search area.
-7. Fuse all candidate correspondences.
-8. Apply geometric verification with RANSAC.
-9. Select spatially uniform inlier matches.
-10. Refine selected matches to sub-pixel accuracy.
-11. Estimate the final transformation.
-12. Generate registered products and quality metrics.
+**Ablation table (to fill)**
 
-This is preferable to running LoFTR or LightGlue directly on full images because the graph stage reduces the search space, improves robustness to large scale differences, provides an explainable initial alignment, helps avoid false matches in repetitive crater regions, and makes fine matching faster.
+| Method | RMSE (px) | Inlier ratio | Coverage |
+| --- | --- | --- | --- |
+| SIFT + RANSAC (baseline) | | | |
+| Raw LoFTR | | | |
+| + Closest-sun reference | | | |
+| + Relighting / invariant features | | | |
+| + Landmark constellation coarse alignment | | | |
+| Full pipeline (+ jitter model) | | | |
 
-## 7. Transformation estimation strategy
+## 9. Implementation plan
 
-Use a hierarchical model-selection strategy:
+| Phase | Content | Status target |
+| --- | --- | --- |
+| 1. Baseline | Map-projected inputs, SIFT + RANSAC, RMSE and inlier metrics | Before finale |
+| 2. Landmarks | Crater / ridge detection, constellation (triangle) matching | Before finale |
+| 3. Illumination | Closest-sun selection, relighting, invariant features, shadow masks | Before finale |
+| 4. Fine matching | Tiled LoFTR, MAGSAC, grid selection, sub-pixel phase correlation, simple jitter model | Core |
+| 5. Benchmark & demo | Synthetic ground truth, ablation, GeoTIFF/CSV outputs, Streamlit demo | Core |
 
-```text
-Graph correspondences -> Similarity transformation
-                      -> Affine transformation
-                      -> Homography, if justified
-                      -> Local deformation, if necessary
-```
+**Minimum viable product (must work):** map-projected inputs · closest-sun reference · relighting or phase features · crater-triangle coarse alignment · LoFTR (SIFT fallback) · MAGSAC · grid selection · sub-pixel phase correlation · held-out RMSE · GeoTIFF + CSV outputs.
 
-Do not start directly with a homography or thin-plate spline. A flexible model can produce a visually aligned but physically incorrect result.
+**Extensions (presented as future work):** full orthorectification from camera models (SPICE) · high-fidelity spacecraft jitter modelling · polar shadow-edge matching · LightGlue branch · chained IIRS registration.
 
-For each model, calculate:
+**Key risks and mitigations**
+- **Data preparation** is the biggest time risk: use map-projected / ortho products (LROC, SELENE, ISSDC derived products) instead of building orthorectification from raw geometry.
+- **LoFTR on lunar images is unproven:** test it early on 2–3 real pairs; the pipeline falls back to classical matching plus phase-correlation refinement.
+- **OHRC sub-pixel target** needs ~0.5 px accuracy on the NAC grid: verify on the synthetic benchmark.
 
-- Inlier count
-- Inlier ratio
-- RMSE
-- Spatial coverage
-- Validation error
-- Model complexity penalty
+## 10. Technology stack
 
-A suitable model score is:
+| Tool | Use |
+| --- | --- |
+| Python + GDAL / rasterio | PDS4 reading, lunar map projections, GeoTIFF output |
+| OpenCV / scikit-image | Crater detection (Hough / contours), phase correlation, RANSAC / MAGSAC |
+| PyTorch + Kornia | Pre-trained LoFTR / LightGlue feature-matching algorithms (GPU) |
+| NumPy / SciPy | Constellation graph matching, relighting, jitter model |
+| scikit-learn | PCA for IIRS band reduction |
+| Streamlit | Demo UI: upload, register, view residual arrow maps |
 
-$$
-S = w_1N_{\text{inlier}} + w_2R_{\text{inlier}} + w_3C_{\text{coverage}} - w_4RMSE - w_5P_{\text{complexity}}
-$$
+## 11. Data sources
 
-Select the simplest model that gives acceptable residual error.
+- Chandrayaan-2 OHRC, TMC-2, IIRS: ISRO ISSDC — https://chmapbrowse.issdc.gov.in/
+- LRO NAC: https://lroc.im-ldi.com/images/downloads/ · LROC QuickMap: https://quickmap.lroc.im-ldi.com/
+- SELENE (Kaguya) Terrain Camera: JAXA DARTS — https://darts.isas.jaxa.jp/planet/pdap/selene/
+- Lunar DEMs: SLDEM2015 (Barker et al., Icarus, 2016); LOLA via PDS Geosciences Node — https://pds-geosciences.wustl.edu/
+- Crater catalogue: Robbins, *A global lunar crater database*, JGR Planets, 2019
 
-## 8. Recommended implementation phases
+## 12. Proposal-ready architecture statement
 
-### Phase 1: Baseline
-
-Implement:
-
-- Metadata parsing
-- Image normalization
-- Gradient and phase images
-- SIFT or AKAZE matching
-- RANSAC affine estimation
-- Grid-based uniform match selection
-- Local NCC refinement
-- RMSE and inlier metrics
-
-This provides a working benchmark.
-
-### Phase 2: Natural landmark module
-
-Add:
-
-- Crater detection
-- Crater rim extraction
-- Ridge and valley extraction
-- Landmark confidence scoring
-- Graph construction
-- Graph-based coarse alignment
-
-This is the key scientific contribution.
-
-### Phase 3: Learned fine matching
-
-Add either LoFTR or SuperPoint + LightGlue. Start with one model. LoFTR may be simpler conceptually for the first learned implementation because it does not require a separate keypoint detector.
-
-### Phase 4: Hybrid fusion
-
-Combine:
-
-- Graph matches
-- Learned matches
-- Classical descriptors
-- Geometric confidence
-- Local correlation confidence
-
-### Phase 5: Sub-pixel and local correction
-
-Add:
-
-- Sub-pixel patch refinement
-- Local affine correction
-- Thin-plate spline or B-spline deformation only where justified
-- Uncertainty estimation
-
-## 9. Proposal-ready architecture statement
-
-> The proposed system uses a metadata-assisted, hierarchical, multi-modal image-registration architecture. First, approximate image footprints and scale ranges are estimated using spacecraft and sensor metadata. Sensor-specific radiometric and geometric preprocessing is then applied to generate illumination-invariant representations. Natural lunar landmarks such as crater rims, ridges, valleys, albedo boundaries, and terrain junctions are detected and represented using shape, gradient, texture, and spatial-relation descriptors. A spatial constellation or graph-matching module establishes robust coarse correspondences using scale- and rotation-invariant geometric relationships. The resulting transformation initializes a fine correspondence stage based on LoFTR and/or LightGlue. Candidate correspondences from semantic graph matching, learned matching, and classical descriptors are fused and verified using robust RANSAC/MAGSAC estimation. Spatially uniform inlier points are selected using grid- or Poisson-disk-based sampling, followed by local sub-pixel refinement using normalized cross-correlation and phase-based optimization. Finally, the source image is registered, and the system generates match points, transformation parameters, confidence maps, RMSE, inlier ratio, spatial coverage, and registration-quality reports.
-
-## 10. Final recommendation
-
-Retain the natural landmark and graph-based architecture as the scientific core, and extend it with:
-
-```text
-Your architecture:
-    Natural landmarks
-    Structural representation
-    Graph matching
-    Coarse transformation
-
-Added engineering modules:
-    Sensor preprocessing
-    Metadata-assisted ROI
-    Multi-scale processing
-    LoFTR/LightGlue fine matching
-    RANSAC/MAGSAC
-    Uniform match selection
-    Sub-pixel refinement
-    Validation and product generation
-```
-
-The strongest final design is:
-
-```text
-Metadata-assisted coarse localization
-        +
-Natural lunar landmark graph matching
-        +
-Learned fine correspondence
-        +
-Robust geometric verification
-        +
-Spatially uniform sampling
-        +
-Sub-pixel refinement
-        +
-Quantitative validation
-```
-
-This hybrid design is more robust, explainable, and suitable for the Chandrayaan-2 multi-modal registration problem than either a purely handcrafted graph approach or a purely deep-learning-based matcher.
+> LunaReg is an illumination-aware, landmark-guided registration pipeline for Chandrayaan-2 optical imagery. For each source image (OHRC, TMC-2, IIRS), it selects the resolution-matched reference acquisition (LRO NAC or SELENE TC) whose sun geometry is closest to the source, crops to the footprint overlap, and maps the reference into the source geometry with a single composed projection-and-orthorectification warp, so each image is interpolated only once. It is built on two core ideas. First, the lighting difference is reduced by relighting a copy of the reference under the source's sun angle where the terrain model's resolution supports it, or by using illumination-invariant representations otherwise, with shadows masked out. Second, craters, ridges and terrain junctions are matched as a constellation graph using scale- and rotation-invariant distance ratios and angles, giving a robust coarse alignment. This alignment guides a pre-trained feature-matching algorithm (LoFTR) tile by tile. Twenty percent of matches are held out before any fitting; the rest are filtered with MAGSAC, selected for uniform coverage, refined to sub-pixel precision by phase correlation, and corrected with a global pushbroom jitter model. Accuracy is measured on the held-out checkpoints; results that fail are re-aligned or flagged, and results that pass are produced with a single final warp. Outputs include registered GeoTIFFs, sub-pixel match points, transformation models, residual vector fields, RMSE, inlier statistics and spatial coverage metrics.

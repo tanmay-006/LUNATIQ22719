@@ -5,6 +5,7 @@ Research workspace for illumination-aware registration between Chandrayaan-2 OHR
 ## Structure
 
 - `docs/` - problem statement, architecture, and registration design notes
+- `docs/verified-test-pairs.md` - user-verified OHRC/NAC correspondence for testing
 - `data/raw/ohrc/` - original Chandrayaan-2 OHRC archives and PDS4 products
 - `data/raw/nac/` - original LRO NAC PDS products and archives
 - `data/derived/isis/` - ISIS cubes and display-ready GeoTIFF products
