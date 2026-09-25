@@ -69,7 +69,8 @@ PYTHONPATH=src python -m lunar_isis_gui.register \
 ```
 
 The command prints progress and writes `registered.tif`, `matches.csv`, and
-`metrics.json` under the output directory. Use `--method auto` to try LoFTR
+`metrics.json`, plus a `diagnostic.png` four-panel summary, under the output
+directory. Use `--method auto` to try LoFTR
 before falling back to SIFT. For large cubes, `--max-dimension 1024` (the
 default) downsamples during GDAL conversion, before pixels are loaded into
 Python; this avoids allocating the original multi-gigabyte rasters. Use

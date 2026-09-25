@@ -118,7 +118,7 @@ if __name__ == '__main__':
 **4.2 Output export (1 hour)**
 Write `src/lunar_isis_gui/output.py`:
 - Save registered GeoTIFF (source warped to reference grid)
-- Save match_points.csv: `src_x, src_y, ref_x, ref_y, residual_x, residual_y`
+- Save matches.csv: `src_x, src_y, ref_x, ref_y, confidence, inlier`
 - Save metrics.json: `{"rmse": ..., "median": ..., "ce90": ..., "inliers": ..., "coverage": ...}`
 
 **4.3 Visualization (1.5 hours)**
@@ -221,10 +221,10 @@ requirements/
 └── gpu.txt                     (no change)
 
 outputs/                        (NEW: runtime directory)
-├── registered.tiff
-├── match_points.csv
+├── registered.tif
+├── matches.csv
 ├── metrics.json
-└── demo.png
+└── diagnostic.png
 ```
 
 **Key simplification:** No rasterio/GDAL/complex projection. Instead:

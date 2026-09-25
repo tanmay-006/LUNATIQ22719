@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import sys
 from pathlib import Path
@@ -15,6 +14,8 @@ import numpy as np
 from .cub_loader import load_cub_with_isis
 from .footprint import crop_to_overlap
 from .matching import match_features
+from .output import write_registration_outputs
+from .plotting import plot_4panel
 from .projection import project_reference_via_isis
 from .ransac import fit_transform
 from .validation import measure_accuracy
@@ -58,23 +59,6 @@ def _parser() -> argparse.ArgumentParser:
         help="resize overlap to this maximum side length before matching (default: 1024)",
     )
     return parser
-
-
-def _write_matches(path: Path, source: np.ndarray, reference: np.ndarray, confidence: np.ndarray, mask: np.ndarray) -> None:
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(("source_x", "source_y", "reference_x", "reference_y", "confidence", "inlier"))
-        writer.writerows(
-            (
-                float(source[index, 0]),
-                float(source[index, 1]),
-                float(reference[index, 0]),
-                float(reference[index, 1]),
-                float(confidence[index]),
-                bool(mask[index]),
-            )
-            for index in range(source.shape[0])
-        )
 
 
 def _resize_pair(source: np.ndarray, reference: np.ndarray, max_dimension: int) -> tuple[np.ndarray, np.ndarray, float]:
@@ -173,16 +157,6 @@ def register(
         borderMode=cv2.BORDER_CONSTANT,
         borderValue=0,
     )
-    registered_path = output_dir / "registered.tif"
-    if not cv2.imwrite(str(registered_path), np.asarray(registered)):
-        raise OSError(f"could not write registered raster: {registered_path}")
-    _write_matches(
-        output_dir / "matches.csv",
-        matches["source_points"],
-        matches["reference_points"],
-        matches["confidence"],
-        fit["inlier_mask"],
-    )
     result = {
         "source": str(source_path.resolve()),
         "reference": str(reference_path.resolve()),
@@ -192,16 +166,30 @@ def register(
         "resize_scale": scale,
         "transform": matrix.tolist(),
         "metrics": dict(metrics),
-        "outputs": {
-            "registered": str(registered_path),
-            "matches": str(output_dir / "matches.csv"),
-        },
     }
-    with (output_dir / "metrics.json").open("w", encoding="utf-8") as handle:
+    outputs = write_registration_outputs(
+        output_dir,
+        registered,
+        matches["source_points"],
+        matches["reference_points"],
+        matches["confidence"],
+        fit["inlier_mask"],
+        result,
+    )
+    plot_4panel(
+        source_overlap,
+        reference_overlap,
+        registered,
+        matches["source_points"],
+        matches["reference_points"],
+        output_dir / "diagnostic.png",
+    )
+    result["outputs"] = {**outputs, "diagnostic": str(output_dir / "diagnostic.png")}
+    with Path(outputs["metrics"]).open("w", encoding="utf-8") as handle:
         json.dump(result, handle, indent=2)
         handle.write("\n")
-    print(f"Registered image: {registered_path}")
-    print(f"Metrics: {output_dir / 'metrics.json'}")
+    print(f"Registered image: {outputs['registered']}")
+    print(f"Metrics: {outputs['metrics']}")
     print(f"Inliers: {fit['inlier_count']}/{count} ({fit['inlier_ratio']:.2%})")
     print(f"RMSE: {metrics['rmse']:.4f} px")
     return result

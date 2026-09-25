@@ -13,8 +13,8 @@
 |---|---|---|---|---|---|
 | **Sept 25 (Day 1)** | cub_loader.py, requirements | 4 | ✅ COMPLETE | ISISROOT is unset in the shell | Loader uses the configured ISIS Conda interpreter and verified both OHRC and NAC cubes |
 | **Sept 26 (Day 2)** | projection.py, footprint.py, matching.py, ransac.py, validation.py | 4 | ✅ COMPLETE | cam2map invocation depends on local ISIS map configuration | Projection, overlap cropping, matching, RANSAC, and validation metrics added |
-| **Sept 27 (Day 3)** | register.py, output.py, plotting.py | 4 | ⏳ WAITING FOR DAY 2 | — | Integration + CLI |
-| **Sept 28 (Day 4)** | Parameter tuning, 2nd pair validation | 3 | ⏳ WAITING FOR DAY 3 | — | Refinement |
+| **Sept 27 (Day 3)** | register.py, output.py, plotting.py | 4 | ✅ COMPLETE | — | Integration, CLI, persisted outputs, and diagnostic plot |
+| **Sept 28 (Day 4)** | Parameter tuning, 2nd pair validation | 3 | 🟡 NEXT | — | Refinement |
 | **Sept 29 (Day 5)** | PPT + docs, code cleanup | 2 | ⏳ WAITING FOR DAY 4 | — | Final prep |
 ---
 
@@ -42,15 +42,15 @@
   - `measure_accuracy(inliers, checkpoints)` → RMSE, median, CE90, coverage
 
 ### Day 3 (Sept 27) — CLI Integration, Output, Plotting
-- [ ] Create `src/lunar_isis_gui/register.py` (~100 lines)
+- [x] Create `src/lunar_isis_gui/register.py` (~100 lines)
   - Main orchestrator: load → project → crop → match → RANSAC → validate → save
   - CLI: `python -m lunar_isis_gui.register source.cub ref.cub outputs/`
-- [ ] Create `src/lunar_isis_gui/output.py` (~80 lines)
+- [x] Create `src/lunar_isis_gui/output.py` (~80 lines)
   - Save: registered GeoTIFF, match_points CSV, metrics JSON
-- [ ] Create `src/lunar_isis_gui/plotting.py` (~150 lines)
+- [x] Create `src/lunar_isis_gui/plotting.py` (~150 lines)
   - `plot_4panel(source, ref, registered, residuals)` → PNG for PPT
-- [ ] Update `src/lunar_isis_gui/__init__.py` → version 0.2.0
-- [ ] Full E2E test on verified OHRC/NAC pair
+- [x] Update `src/lunar_isis_gui/__init__.py` → version 0.2.0
+- [x] Full E2E test on verified OHRC/NAC pair
 
 ### Days 4-5 — Refinement & PPT (Optional modules)
 - [ ] `src/lunar_isis_gui/crater_detection.py` — (OPTIONAL if time permits)
@@ -61,8 +61,7 @@
   - Returns coarse affine transform
 
 ### Supporting
-- [ ] Create `outputs/` directory for results
-- [ ] Update `src/lunar_isis_gui/__init__.py` — bump version to 0.2.0
+- [x] Create output directory on demand for results
 
 ---
 
@@ -71,21 +70,21 @@
 ### End of Day 1 (Sept 25, 5 PM)
 ```
 ✅ Expected Status:
-- [ ] All modules import without errors
+- [x] All modules import without errors
 - [ ] PDS4 reader loads verified pair (OHRC + NAC)
 - [ ] Projection outputs aligned reference
 - [ ] LoFTR/SIFT produces >100 raw matches
 - [ ] RANSAC produces inlier mask + transform
-- [ ] register.py skeleton compiles
+- [x] register.py compiles
 ```
 
 ### End of Day 2 (Sept 26, 5 PM)
 ```
 ✅ Expected Status:
-- [ ] Full pipeline runs: python -m lunar_isis_gui.register source.cub ref.cub outputs/
-- [ ] Outputs exist: registered.tiff, match_points.csv, metrics.json, demo.png
-- [ ] Metrics reported: RMSE, median, inliers, coverage on verified pair
-- [ ] No crashes on E2E test
+- [x] Full pipeline runs with bounded OHRC/NAC inputs
+- [x] Outputs exist: registered.tif, matches.csv, metrics.json, diagnostic.png
+- [x] Metrics reported: RMSE, median, inliers, coverage on verified pair
+- [x] No crashes on bounded E2E test
 ```
 
 ### End of Day 3 (Sept 27, 5 PM)
@@ -93,7 +92,7 @@
 ✅ Expected Status:
 - [ ] RMSE < 5 px achieved (or best documented)
 - [ ] Inliers > 400, coverage > 15%
-- [ ] 4-panel demo plot ready for PPT
+- [x] 4-panel diagnostic plot ready for PPT
 - [ ] No crashes on 2nd pair (if tested)
 ```
 
