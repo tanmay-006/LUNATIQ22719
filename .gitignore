@@ -1,0 +1,19 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local environments and installers
+.env
+.env.*
+tools/installers/Miniforge3.sh
+
+# Large local datasets and generated products
+data/raw/
+data/derived/
+
+# ISIS and temporary files
+*.log
+*.prt
+*.tmp
