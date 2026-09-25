@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 import cv2
 import numpy as np
@@ -13,6 +13,7 @@ class FeatureMatches(TypedDict):
     reference_points: np.ndarray
     confidence: np.ndarray
     method: str
+    warning: NotRequired[str]
 
 
 def _normalise(image: np.ndarray) -> np.ndarray:
@@ -107,7 +108,11 @@ def match_features(
             matches = _loftr_matches(source, reference, confidence_threshold)
             if matches["source_points"].shape[0] > 0 or method == "loftr":
                 return matches
-        except (ImportError, RuntimeError, OSError):
-            if method == "loftr":
-                raise
+        except (ImportError, RuntimeError, OSError) as error:
+            sift_matches = _sift_matches(source, reference, ratio_threshold)
+            sift_matches["warning"] = (
+                "LoFTR is unavailable; used SIFT instead. "
+                f"Reason: {error}"
+            )
+            return sift_matches
     return _sift_matches(source, reference, ratio_threshold)

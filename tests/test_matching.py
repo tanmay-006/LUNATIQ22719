@@ -61,5 +61,20 @@ def test_sift_deduplicates_reference_keypoints(monkeypatch):
     assert matches["reference_points"].shape == (1, 2)
 
 
+def test_loftr_missing_dependency_falls_back_to_sift(monkeypatch):
+    source = _pattern()
+    reference = source.copy()
+
+    def unavailable(*args, **kwargs):
+        raise ImportError("No module named 'torch'")
+
+    monkeypatch.setattr("lunar_isis_gui.matching._loftr_matches", unavailable)
+
+    matches = match_features(source, reference, method="loftr")
+
+    assert matches["method"] == "sift"
+    assert "LoFTR is unavailable" in matches["warning"]
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

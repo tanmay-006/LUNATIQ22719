@@ -33,6 +33,15 @@ the correct ISIS importer, writes cubes under `data/derived/isis/`, and can
 open the result in `qview`. Existing `.cub` and `.tiff` products can also be
 opened directly.
 
+The lower **Visual Registration Pipeline** panel runs one selected OHRC cube
+against one or more NAC `.cub` references in a background thread. It shows
+the six stages live (load, projection, overlap, matching, RANSAC, and output),
+keeps the command log visible, and previews the saved checkpoints under
+`/tmp/lunareg-gui/<reference-name>/`. A rejected candidate is shown as
+rejected with its exact reason; it is not presented as a successful mapping.
+Use `auto` projection to expose camera-model errors, or `fallback` when
+testing the diagnostic pipeline with cubes that are not SPICE-initialized.
+
 Import an OHRC PDS4 product:
 
 ```bash
@@ -84,17 +93,28 @@ The CLI rejects runs with too few matches, duplicate keypoint assignments, or
 rank-deficient point geometry, too few inliers, or a low inlier ratio instead
 of writing a misleading registration image. This is expected for low-texture
 or insufficiently overlapping inputs.
+When `--projection-method auto` prints an ISIS error such as
+`Unable to find PVL group [Instrument]`, the input is not a camera-model-
+initialized ISIS cube. Re-import the original PDS product with the matching
+ISIS `pds2isis` template, run `spiceinit` successfully, and then rerun
+registration. The fallback projection remains available for pipeline
+diagnostics, but cannot replace those camera-model labels.
 
 To inspect the visual checkpoints from each early stage, add
 `--save-intermediates`. The output directory will then also contain:
 
 - `01_source.tif` — bounded source cube loaded by the pipeline
 - `02_projected_reference.tif` — reference after projection/fallback
+- `02_projection.png` — source and projected reference side by side
 - `03_overlap_source.tif` and `03_overlap_reference.tif` — shared footprint
+- `03_overlap.png` — source and reference overlap side by side
+- `04_matches.png` — every accepted feature correspondence, including weak runs
+- `05_ransac.png` — source/reference RANSAC inliers and outliers
 - `diagnostic.png` — source, reference, registered image, and match points
 
-Open these with `qview` or an image viewer. Feature matching and RANSAC are
-represented in `diagnostic.png` and `matches.csv`; the transform itself is
-also recorded in `metrics.json`.
+Open these with `qview` or an image viewer. The GUI previews each checkpoint
+while processing and keeps the matching/RANSAC previews visible when a
+candidate is rejected. The transform and validation metrics are also recorded
+in `matches.csv` and `metrics.json`.
 
 The original datasets are intentionally kept outside the Python source tree because they are large and are not application code.

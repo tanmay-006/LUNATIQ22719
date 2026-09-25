@@ -19,6 +19,7 @@ class ProjectedReference(TypedDict):
     image: np.ndarray
     metadata: CubMetadata
     method: str
+    projection_error: str | None
 
 
 def _tool(name: str) -> str | None:
@@ -68,25 +69,39 @@ def _affine_fallback(source: np.ndarray, reference: np.ndarray) -> np.ndarray:
     )
 
 
-def _try_cam2map(source_cub: Path, ref_cub: Path, source_shape: tuple[int, int]) -> np.ndarray | None:
-    """Try ISIS cam2map, returning None when the local ISIS configuration rejects it."""
+def _try_cam2map(
+    source_cub: Path, ref_cub: Path, source_shape: tuple[int, int]
+) -> tuple[np.ndarray | None, str | None]:
+    """Try ISIS cam2map and retain its diagnostic when camera setup fails."""
 
     cam2map = _tool("cam2map")
     if cam2map is None:
-        return None
+        return None, "cam2map was not found in the active ISIS environment"
     with tempfile.TemporaryDirectory(prefix="lunareg-map-") as directory:
         output = Path(directory) / "projected.cub"
         try:
-            subprocess.run(
-                [cam2map, str(ref_cub), str(output)],
+            completed = subprocess.run(
+                [
+                    cam2map,
+                    f"from={ref_cub}",
+                    f"to={output}",
+                    f"map={Path(os.environ.get('ISISROOT', '')) / 'appdata/templates/maps/sinusoidal.map'}",
+                    "-NOGUI",
+                ],
                 check=True,
                 capture_output=True,
                 text=True,
             )
             projected = extract_cub_array(output)
-        except (OSError, subprocess.CalledProcessError, CubLoaderError):
-            return None
-    return cv2.resize(projected, (source_shape[1], source_shape[0]), interpolation=cv2.INTER_LINEAR)
+        except subprocess.CalledProcessError as error:
+            detail = (error.stdout or error.stderr or "").strip().replace("\n", " ")
+            return None, detail[-500:] or f"cam2map exited with status {error.returncode}"
+        except (OSError, CubLoaderError) as error:
+            return None, str(error)
+    return (
+        cv2.resize(projected, (source_shape[1], source_shape[0]), interpolation=cv2.INTER_LINEAR),
+        None,
+    )
 
 
 def project_reference_via_isis(
@@ -101,10 +116,21 @@ def project_reference_via_isis(
     source = load_cub_with_isis(source_cub, max_dimension=max_dimension)
     reference = load_cub_with_isis(ref_cub, max_dimension=max_dimension)
     source_shape = source["image"].shape[-2:]
-    projected = _try_cam2map(Path(source_cub), Path(ref_cub), source_shape) if use_cam2map else None
+    projection_error = None
+    if use_cam2map:
+        projected, projection_error = _try_cam2map(
+            Path(source_cub), Path(ref_cub), source_shape
+        )
+    else:
+        projected = None
     method = "cam2map" if projected is not None else "affine-fallback"
     if projected is None:
         projected = _affine_fallback(source["image"], reference["image"])
     metadata = dict(reference["metadata"])
     metadata["dimensions"] = (source_shape[1], source_shape[0])
-    return {"image": np.asarray(projected), "metadata": metadata, "method": method}
+    return {
+        "image": np.asarray(projected),
+        "metadata": metadata,
+        "method": method,
+        "projection_error": projection_error,
+    }

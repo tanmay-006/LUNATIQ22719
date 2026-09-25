@@ -15,7 +15,7 @@ from .cub_loader import load_cub_with_isis
 from .footprint import crop_to_overlap
 from .matching import match_features
 from .output import write_intermediates, write_registration_outputs
-from .plotting import plot_4panel
+from .plotting import plot_4panel, plot_matches, plot_ransac, plot_stage_pair
 from .projection import project_reference_via_isis
 from .ransac import fit_transform
 from .validation import measure_accuracy
@@ -109,6 +109,8 @@ def register(
         max_dimension=max_dimension,
     )
     print(f"      projection method: {projected['method']}", flush=True)
+    if projected["projection_error"]:
+        print(f"      cam2map reason: {projected['projection_error']}", flush=True)
     print("[3/6] Cropping to shared footprint", flush=True)
     overlap = crop_to_overlap(
         source["image"],
@@ -140,6 +142,22 @@ def register(
         if save_intermediates
         else {}
     )
+    if save_intermediates:
+        plot_stage_pair(
+            source["image"],
+            projected["image"],
+            output_dir / "02_projection.png",
+            title="Projection comparison",
+            right_title="Projected reference",
+        )
+        plot_stage_pair(
+            source_overlap,
+            reference_overlap,
+            output_dir / "03_overlap.png",
+            title="Shared-footprint mapping",
+            left_title="Source overlap",
+            right_title="Reference overlap",
+        )
     print(f"[4/6] Matching features ({method})", flush=True)
     matches = match_features(
         source_overlap,
@@ -148,7 +166,17 @@ def register(
         ratio_threshold=ratio,
     )
     count = matches["source_points"].shape[0]
+    if matches.get("warning"):
+        print(f"      matcher notice: {matches['warning']}", flush=True)
     print(f"      matches: {count}", flush=True)
+    if save_intermediates:
+        plot_matches(
+            source_overlap,
+            reference_overlap,
+            matches["source_points"],
+            matches["reference_points"],
+            output_dir / "04_matches.png",
+        )
     if count < 3:
         raise ValueError(f"at least three matches are required; found {count}")
     print("[5/6] Fitting RANSAC transform", flush=True)
@@ -164,6 +192,15 @@ def register(
         transform=fit["transform"],
         image_shape=source_overlap.shape,
     )
+    if save_intermediates:
+        plot_ransac(
+            source_overlap,
+            reference_overlap,
+            matches["source_points"],
+            matches["reference_points"],
+            fit["inlier_mask"],
+            output_dir / "05_ransac.png",
+        )
     if fit["inlier_count"] < 3:
         raise ValueError(
             "registration requires at least three inliers; "
@@ -188,6 +225,7 @@ def register(
         "source": str(source_path.resolve()),
         "reference": str(reference_path.resolve()),
         "projection_method": projected["method"],
+        "projection_error": projected["projection_error"],
         "matching_method": matches["method"],
         "max_dimension": max_dimension,
         "resize_scale": scale,
