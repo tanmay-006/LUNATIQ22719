@@ -21,6 +21,17 @@ source /home/tanmay/miniforge3/etc/profile.d/conda.sh
 conda activate isis
 ```
 
+Launch the GUI workbench:
+
+```bash
+./launch_isis_gui.sh
+```
+
+Choose an OHRC `.xml` label or NAC `.IMG`/`.img` file. The workbench selects
+the correct ISIS importer, writes cubes under `data/derived/isis/`, and can
+open the result in `qview`. Existing `.cub` and `.tiff` products can also be
+opened directly.
+
 Import an OHRC PDS4 product:
 
 ```bash
