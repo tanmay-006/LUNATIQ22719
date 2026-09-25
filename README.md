@@ -59,4 +59,25 @@ Open a NAC cube:
 qview data/derived/isis/nac/<product>.cub
 ```
 
+Run the registration CLI:
+
+```bash
+PYTHONPATH=src python -m lunar_isis_gui.register \
+  data/derived/isis/ohrc/source.cub \
+  data/derived/isis/nac/reference.cub \
+  outputs/
+```
+
+The command prints progress and writes `registered.tif`, `matches.csv`, and
+`metrics.json` under the output directory. Use `--method auto` to try LoFTR
+before falling back to SIFT. For large cubes, `--max-dimension 1024` (the
+default) downsamples during GDAL conversion, before pixels are loaded into
+Python; this avoids allocating the original multi-gigabyte rasters. Use
+`--projection-method auto` to attempt ISIS `cam2map`, or the default
+`fallback` for the local affine/phase-correlation approximation. The fallback
+is useful for pipeline diagnostics but is not a substitute for camera-model
+map projection, so inspect `metrics.json` and the generated match list before
+treating a result as scientifically valid. `launch_isis_gui.sh` starts the
+graphical workbench; it does not run the registration CLI.
+
 The original datasets are intentionally kept outside the Python source tree because they are large and are not application code.

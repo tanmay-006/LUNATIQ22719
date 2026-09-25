@@ -59,7 +59,7 @@ def _affine_fallback(source: np.ndarray, reference: np.ndarray) -> np.ndarray:
     shift, _ = cv2.phaseCorrelate(source_small, reference_small)
     matrix = np.float32([[1, 0, shift[0]], [0, 1, shift[1]]])
     return cv2.warpAffine(
-        reference,
+        np.asarray(reference, dtype=np.float32),
         matrix,
         (source_shape[1], source_shape[0]),
         flags=cv2.INTER_LINEAR,
@@ -92,13 +92,16 @@ def _try_cam2map(source_cub: Path, ref_cub: Path, source_shape: tuple[int, int])
 def project_reference_via_isis(
     source_cub: str | os.PathLike[str],
     ref_cub: str | os.PathLike[str],
+    *,
+    use_cam2map: bool = True,
+    max_dimension: int | None = None,
 ) -> ProjectedReference:
     """Return a reference image on the source grid, using ISIS or affine fallback."""
 
-    source = load_cub_with_isis(source_cub)
-    reference = load_cub_with_isis(ref_cub)
+    source = load_cub_with_isis(source_cub, max_dimension=max_dimension)
+    reference = load_cub_with_isis(ref_cub, max_dimension=max_dimension)
     source_shape = source["image"].shape[-2:]
-    projected = _try_cam2map(Path(source_cub), Path(ref_cub), source_shape)
+    projected = _try_cam2map(Path(source_cub), Path(ref_cub), source_shape) if use_cam2map else None
     method = "cam2map" if projected is not None else "affine-fallback"
     if projected is None:
         projected = _affine_fallback(source["image"], reference["image"])

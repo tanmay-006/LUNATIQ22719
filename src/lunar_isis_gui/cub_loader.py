@@ -166,13 +166,20 @@ def _read_raster(path: Path) -> np.ndarray:
             return np.asarray(image)
 
 
-def extract_cub_array(cub_path: str | os.PathLike[str]) -> np.ndarray:
+def extract_cub_array(
+    cub_path: str | os.PathLike[str],
+    *,
+    max_dimension: int | None = None,
+) -> np.ndarray:
     """Convert an ISIS cube to a temporary TIFF and return its pixel array."""
 
     path = Path(cub_path).expanduser().resolve()
     if not path.is_file():
         raise FileNotFoundError(f"CUB file does not exist: {path}")
-    converter, _ = _find_tool("cube2tiff", "gdal_translate")
+    if max_dimension is not None:
+        converter, _ = _find_tool("gdal_translate")
+    else:
+        converter, _ = _find_tool("cube2tiff", "gdal_translate")
     if converter is None:
         raise CubLoaderError(
             "No cube converter found. Activate the ISIS environment or install "
@@ -183,12 +190,21 @@ def extract_cub_array(cub_path: str | os.PathLike[str]) -> np.ndarray:
         if Path(converter).name == "cube2tiff":
             command = [converter, str(path), str(output)]
         else:
-            command = [converter, "-of", "GTiff", str(path), str(output)]
+            command = [converter, "-of", "GTiff"]
+            if max_dimension is not None:
+                if max_dimension <= 0:
+                    raise ValueError("max_dimension must be positive")
+                command.extend(["-outsize", str(max_dimension), "0"])
+            command.extend([str(path), str(output)])
         _run(command)
         return np.asarray(_read_raster(output))
 
 
-def load_cub_with_isis(cub_path: str | os.PathLike[str]) -> CubProduct:
+def load_cub_with_isis(
+    cub_path: str | os.PathLike[str],
+    *,
+    max_dimension: int | None = None,
+) -> CubProduct:
     """Load a cube and return its image plus dimensions/geospatial metadata."""
 
     path = Path(cub_path).expanduser().resolve()
@@ -198,9 +214,22 @@ def load_cub_with_isis(cub_path: str | os.PathLike[str]) -> CubProduct:
     info_tool, _ = _find_tool("gdalinfo")
     if info_tool:
         metadata.update(_parse_gdalinfo(_run([info_tool, str(path)])))
-    image = extract_cub_array(path)
-    if "dimensions" not in metadata:
-        metadata["dimensions"] = (int(image.shape[-1]), int(image.shape[-2]))
+    image = extract_cub_array(path, max_dimension=max_dimension)
+    original_dimensions = metadata.get("dimensions")
+    metadata["dimensions"] = (int(image.shape[-1]), int(image.shape[-2]))
+    if original_dimensions and "geotransform" in metadata:
+        original_width, original_height = original_dimensions
+        width_scale = original_width / image.shape[-1]
+        height_scale = original_height / image.shape[-2]
+        origin_x, pixel_x, _, origin_y, _, pixel_y = metadata["geotransform"]
+        metadata["geotransform"] = (
+            origin_x,
+            pixel_x * width_scale,
+            0.0,
+            origin_y,
+            0.0,
+            pixel_y * height_scale,
+        )
     metadata["conversion_tool"] = "cube2tiff or gdal_translate"
     _read_label_metadata(path, metadata)
     return {"image": np.asarray(image), "metadata": metadata}
