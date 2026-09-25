@@ -36,5 +36,30 @@ def test_invalid_matching_inputs_are_rejected():
         match_features(np.zeros((2, 2)), np.zeros((2, 2)), method="invalid")
 
 
+def test_sift_deduplicates_reference_keypoints(monkeypatch):
+    source = np.full((32, 32), 128, dtype=np.uint8)
+    reference = source.copy()
+
+    class FakeDetector:
+        def detectAndCompute(self, image, mask):
+            keypoints = [cv2.KeyPoint(float(i), float(i), 1) for i in range(4)]
+            return keypoints, np.ones((4, 4), dtype=np.float32)
+
+    class FakeMatcher:
+        def knnMatch(self, source_descriptors, reference_descriptors, k):
+            return [
+                [cv2.DMatch(0, 0, 0.1), cv2.DMatch(0, 1, 1.0)],
+                [cv2.DMatch(1, 0, 0.2), cv2.DMatch(1, 2, 1.0)],
+            ]
+
+    monkeypatch.setattr(cv2, "SIFT_create", lambda: FakeDetector())
+    monkeypatch.setattr(cv2, "BFMatcher", lambda norm: FakeMatcher())
+
+    matches = match_features(source, reference, method="sift")
+
+    assert matches["source_points"].shape == (1, 2)
+    assert matches["reference_points"].shape == (1, 2)
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

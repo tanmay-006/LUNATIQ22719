@@ -32,6 +32,12 @@ def fit_transform(
         raise ValueError("source_points and reference_points must both have shape (N, 2)")
     if source.shape[0] < 3:
         raise ValueError("at least three point pairs are required")
+    if np.unique(source, axis=0).shape[0] < 3 or np.unique(reference, axis=0).shape[0] < 3:
+        raise ValueError("at least three unique source and reference points are required")
+    if np.linalg.matrix_rank(source - source.mean(axis=0)) < 2:
+        raise ValueError("source points are geometrically degenerate")
+    if np.linalg.matrix_rank(reference - reference.mean(axis=0)) < 2:
+        raise ValueError("reference points are geometrically degenerate")
     if threshold <= 0 or not 0 < confidence < 1 or max_iterations < 1:
         raise ValueError("threshold must be positive, confidence must be in (0, 1), and max_iterations must be positive")
 

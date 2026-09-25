@@ -40,6 +40,15 @@ def _sift_matches(source: np.ndarray, reference: np.ndarray, ratio: float) -> Fe
     matcher = cv2.BFMatcher(cv2.NORM_L2)
     pairs = matcher.knnMatch(source_descriptors, reference_descriptors, k=2)
     good = [pair for pair in pairs if len(pair) == 2 and pair[0].distance < ratio * pair[1].distance]
+    # Repetitive or saturated regions can produce several query matches to the
+    # same target keypoint. Keep only the strongest match per target location.
+    unique_good: dict[int, tuple[cv2.DMatch, cv2.DMatch]] = {}
+    for pair in good:
+        match = pair[0]
+        previous = unique_good.get(match.trainIdx)
+        if previous is None or match.distance < previous[0].distance:
+            unique_good[match.trainIdx] = (match, pair[1])
+    good = sorted(unique_good.values(), key=lambda pair: pair[0].distance)
     source_points = np.asarray([pair[0].queryIdx for pair in good], dtype=np.int32)
     reference_points = np.asarray([pair[0].trainIdx for pair in good], dtype=np.int32)
     source_points = np.asarray([source_keypoints[index].pt for index in source_points], dtype=np.float32)

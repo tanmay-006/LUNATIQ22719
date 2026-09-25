@@ -80,5 +80,21 @@ is useful for pipeline diagnostics but is not a substitute for camera-model
 map projection, so inspect `metrics.json` and the generated match list before
 treating a result as scientifically valid. `launch_isis_gui.sh` starts the
 graphical workbench; it does not run the registration CLI.
+The CLI rejects runs with too few matches, duplicate keypoint assignments, or
+rank-deficient point geometry, too few inliers, or a low inlier ratio instead
+of writing a misleading registration image. This is expected for low-texture
+or insufficiently overlapping inputs.
+
+To inspect the visual checkpoints from each early stage, add
+`--save-intermediates`. The output directory will then also contain:
+
+- `01_source.tif` — bounded source cube loaded by the pipeline
+- `02_projected_reference.tif` — reference after projection/fallback
+- `03_overlap_source.tif` and `03_overlap_reference.tif` — shared footprint
+- `diagnostic.png` — source, reference, registered image, and match points
+
+Open these with `qview` or an image viewer. Feature matching and RANSAC are
+represented in `diagnostic.png` and `matches.csv`; the transform itself is
+also recorded in `metrics.json`.
 
 The original datasets are intentionally kept outside the Python source tree because they are large and are not application code.

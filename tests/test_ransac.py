@@ -33,5 +33,13 @@ def test_fit_transform_requires_matching_point_pairs():
 
 def test_fit_transform_rejects_degenerate_matches():
     points = np.zeros((3, 2), dtype=np.float32)
-    with pytest.raises(ValueError, match="valid affine"):
+    with pytest.raises(ValueError, match="unique"):
         fit_transform(points, points)
+
+
+def test_fit_transform_rejects_duplicate_reference_points():
+    source = np.array([[0, 0], [1, 0], [2, 1]], dtype=np.float32)
+    reference = np.array([[4, 5], [4, 5], [4, 5]], dtype=np.float32)
+
+    with pytest.raises(ValueError, match="unique"):
+        fit_transform(source, reference)

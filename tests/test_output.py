@@ -6,7 +6,7 @@ import json
 import cv2
 import numpy as np
 
-from lunar_isis_gui.output import write_registration_outputs
+from lunar_isis_gui.output import write_intermediates, write_registration_outputs
 from lunar_isis_gui.plotting import plot_4panel
 
 
@@ -37,3 +37,17 @@ def test_writes_diagnostic_plot(tmp_path):
 
     assert path.is_file()
     assert path.stat().st_size > 0
+
+
+def test_writes_intermediate_images(tmp_path):
+    image = np.zeros((8, 8), dtype=np.uint8)
+    outputs = write_intermediates(
+        tmp_path,
+        source=image,
+        projected_reference=image,
+        overlap_source=image,
+        overlap_reference=image,
+    )
+
+    assert set(outputs) == {"source", "projected_reference", "overlap_source", "overlap_reference"}
+    assert all((tmp_path / path.split("/")[-1]).is_file() for path in outputs.values())

@@ -14,7 +14,7 @@ import numpy as np
 from .cub_loader import load_cub_with_isis
 from .footprint import crop_to_overlap
 from .matching import match_features
-from .output import write_registration_outputs
+from .output import write_intermediates, write_registration_outputs
 from .plotting import plot_4panel
 from .projection import project_reference_via_isis
 from .ransac import fit_transform
@@ -58,6 +58,11 @@ def _parser() -> argparse.ArgumentParser:
         default=1024,
         help="resize overlap to this maximum side length before matching (default: 1024)",
     )
+    parser.add_argument(
+        "--save-intermediates",
+        action="store_true",
+        help="save visual checkpoints for loading, projection, and overlap stages",
+    )
     return parser
 
 
@@ -89,6 +94,7 @@ def register(
     ransac_threshold: float,
     projection_method: str,
     max_dimension: int,
+    save_intermediates: bool = False,
 ) -> dict[str, object]:
     """Run registration and write the registered raster, matches, and metrics."""
 
@@ -123,6 +129,17 @@ def register(
         )
     else:
         print(f"      overlap: {overlap['source'].shape[1]} x {overlap['source'].shape[0]}", flush=True)
+    intermediate_outputs = (
+        write_intermediates(
+            output_dir,
+            source=source["image"],
+            projected_reference=projected["image"],
+            overlap_source=source_overlap,
+            overlap_reference=reference_overlap,
+        )
+        if save_intermediates
+        else {}
+    )
     print(f"[4/6] Matching features ({method})", flush=True)
     matches = match_features(
         source_overlap,
@@ -147,6 +164,16 @@ def register(
         transform=fit["transform"],
         image_shape=source_overlap.shape,
     )
+    if fit["inlier_count"] < 3:
+        raise ValueError(
+            "registration requires at least three inliers; "
+            f"found {fit['inlier_count']}"
+        )
+    if fit["inlier_ratio"] < 0.5:
+        raise ValueError(
+            "registration inlier ratio is too low; "
+            f"found {fit['inlier_ratio']:.2%}"
+        )
     print("[6/6] Writing outputs", flush=True)
     matrix = np.vstack((fit["transform"], [0.0, 0.0, 1.0]))
     registered = cv2.warpAffine(
@@ -167,6 +194,8 @@ def register(
         "transform": matrix.tolist(),
         "metrics": dict(metrics),
     }
+    if intermediate_outputs:
+        result["intermediates"] = intermediate_outputs
     outputs = write_registration_outputs(
         output_dir,
         registered,
@@ -207,6 +236,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ransac_threshold=args.ransac_threshold,
             projection_method=args.projection_method,
             max_dimension=args.max_dimension,
+            save_intermediates=args.save_intermediates,
         )
     except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
         print(f"Registration failed: {error}", file=sys.stderr)
