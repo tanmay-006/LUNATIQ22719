@@ -11,8 +11,8 @@
 
 | Day | Target Modules | Hours | Status | Blockers | Notes |
 |---|---|---|---|---|---|
-| **Sept 25 (Day 1)** | cub_loader.py, requirements | 4 | 🔴 NOT STARTED | — | Setup + load .cub files |
-| **Sept 26 (Day 2)** | projection.py, footprint.py, matching.py, ransac.py, validation.py | 4 | ⏳ WAITING FOR DAY 1 | — | Core pipeline |
+| **Sept 25 (Day 1)** | cub_loader.py, requirements | 4 | ✅ COMPLETE | ISISROOT is unset in the shell | Loader uses the configured ISIS Conda interpreter and verified both OHRC and NAC cubes |
+| **Sept 26 (Day 2)** | projection.py, footprint.py, matching.py, ransac.py, validation.py | 4 | 🟡 IN PROGRESS | cam2map invocation depends on local ISIS map configuration | Projection and overlap cropping added; matching/RANSAC/metrics remain |
 | **Sept 27 (Day 3)** | register.py, output.py, plotting.py | 4 | ⏳ WAITING FOR DAY 2 | — | Integration + CLI |
 | **Sept 28 (Day 4)** | Parameter tuning, 2nd pair validation | 3 | ⏳ WAITING FOR DAY 3 | — | Refinement |
 | **Sept 29 (Day 5)** | PPT + docs, code cleanup | 2 | ⏳ WAITING FOR DAY 4 | — | Final prep |
@@ -21,18 +21,18 @@
 ## File Checklist (13 modules to create + 1 config update)
 
 ### Day 1 (Sept 25) — Setup + CUB Loader
-- [ ] Update `requirements/base.txt` — add numpy, opencv, torch, scipy, scikit-image, scikit-learn, matplotlib (remove rasterio/GDAL)
-- [ ] Create `src/lunar_isis_gui/cub_loader.py` (~150 lines)
+- [x] Update `requirements/base.txt` — add numpy, opencv, torch, scipy, scikit-image, scikit-learn, matplotlib
+- [x] Create `src/lunar_isis_gui/cub_loader.py`
   - `load_cub_with_isis(path)` → loads .cub via ISIS commands, extracts metadata
   - `extract_cub_array(path)` → convert .cub → temp GeoTIFF → NumPy array
   - Test on verified pair: `ch2_ohr_ncp_20260330T2317474369_d_img_d18.cub` + `m188628884lc.cub`
 
 ### Day 2 (Sept 26) — Projection, Footprint, Feature Matching
-- [ ] Create `src/lunar_isis_gui/projection.py` (~150 lines)
+- [x] Create `src/lunar_isis_gui/projection.py`
   - `project_reference_via_isis(source_cub, ref_cub)` → use ISIS `cam2map` subprocess
   - Fallback: simple affine alignment if ISIS unavailable
   - Test: visual overlap check
-- [ ] Create `src/lunar_isis_gui/footprint.py` (~80 lines)
+- [x] Create `src/lunar_isis_gui/footprint.py`
   - `crop_to_overlap(source_arr, ref_arr, source_meta, ref_meta)` → find & crop intersection
 - [ ] Create `src/lunar_isis_gui/matching.py` (~200 lines)
   - `match_features(source, reference)` → LoFTR primary, SIFT fallback
@@ -276,4 +276,3 @@ Sept 30 (Demo):   DEADLINE — presentation ready
 **Current time:** Sept 25, morning  
 **Status:** 🟢 READY TO START  
 **Next action:** Assign workstreams, create Git branches, begin coding
-
