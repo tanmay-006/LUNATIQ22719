@@ -12,7 +12,7 @@
 | Day | Target Modules | Hours | Status | Blockers | Notes |
 |---|---|---|---|---|---|
 | **Sept 25 (Day 1)** | cub_loader.py, requirements | 4 | ✅ COMPLETE | ISISROOT is unset in the shell | Loader uses the configured ISIS Conda interpreter and verified both OHRC and NAC cubes |
-| **Sept 26 (Day 2)** | projection.py, footprint.py, matching.py, ransac.py, validation.py | 4 | 🟡 IN PROGRESS | cam2map invocation depends on local ISIS map configuration | Projection and overlap cropping added; matching/RANSAC/metrics remain |
+| **Sept 26 (Day 2)** | projection.py, footprint.py, matching.py, ransac.py, validation.py | 4 | ✅ COMPLETE | cam2map invocation depends on local ISIS map configuration | Projection, overlap cropping, matching, RANSAC, and validation metrics added |
 | **Sept 27 (Day 3)** | register.py, output.py, plotting.py | 4 | ⏳ WAITING FOR DAY 2 | — | Integration + CLI |
 | **Sept 28 (Day 4)** | Parameter tuning, 2nd pair validation | 3 | ⏳ WAITING FOR DAY 3 | — | Refinement |
 | **Sept 29 (Day 5)** | PPT + docs, code cleanup | 2 | ⏳ WAITING FOR DAY 4 | — | Final prep |
@@ -38,7 +38,7 @@
   - `match_features(source, reference)` → LoFTR primary, SIFT fallback
 - [x] Create `src/lunar_isis_gui/ransac.py`
   - `fit_transform(source_pts, ref_pts)` → RANSAC affine, returns inliers + transform
-- [ ] Create `src/lunar_isis_gui/validation.py` (~120 lines)
+- [x] Create `src/lunar_isis_gui/validation.py`
   - `measure_accuracy(inliers, checkpoints)` → RMSE, median, CE90, coverage
 
 ### Day 3 (Sept 27) — CLI Integration, Output, Plotting
