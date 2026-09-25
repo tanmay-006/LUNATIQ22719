@@ -34,9 +34,9 @@
   - Test: visual overlap check
 - [x] Create `src/lunar_isis_gui/footprint.py`
   - `crop_to_overlap(source_arr, ref_arr, source_meta, ref_meta)` → find & crop intersection
-- [ ] Create `src/lunar_isis_gui/matching.py` (~200 lines)
+- [x] Create `src/lunar_isis_gui/matching.py`
   - `match_features(source, reference)` → LoFTR primary, SIFT fallback
-- [ ] Create `src/lunar_isis_gui/ransac.py` (~100 lines)
+- [x] Create `src/lunar_isis_gui/ransac.py`
   - `fit_transform(source_pts, ref_pts)` → RANSAC affine, returns inliers + transform
 - [ ] Create `src/lunar_isis_gui/validation.py` (~120 lines)
   - `measure_accuracy(inliers, checkpoints)` → RMSE, median, CE90, coverage

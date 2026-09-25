@@ -1,5 +1,10 @@
+import pathlib
+import sys
+
 import numpy as np
 import pytest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from lunar_isis_gui.footprint import crop_to_overlap
 from lunar_isis_gui.projection import _affine_fallback
