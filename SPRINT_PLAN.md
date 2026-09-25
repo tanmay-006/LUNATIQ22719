@@ -1,266 +1,242 @@
-# LunaReg: 5-Day Sprint to Working Prototype
+# LunaReg: 5-Day Solo Sprint to Working Prototype
 
-**Team:** 3-5 people · **Deadline:** Sept 30, 2026 (5 days) · **Goal:** End-to-end registration on verified OHRC/NAC pair with PPT
+**Team:** 1 person · **Deadline:** Sept 30, 2026 (5 days) · **Goal:** End-to-end registration on verified OHRC/NAC pair with PPT
 
 ---
 
 ## TL;DR
 
-Build a minimal but complete registration pipeline: ingest OHRC + NAC → project to common grid → match features (LoFTR + SIFT fallback) → measure accuracy. Skip jitter model, relighting, and IIRS. Reuse ISIS tools for projection. One parallelizable workstream per person.
+Build a minimal but complete registration pipeline optimized for solo execution: ingest OHRC + NAC (as .cub files) → use ISIS for projection → match features (LoFTR + SIFT fallback) → measure accuracy. Skip jitter model, relighting, and IIRS. Leverage existing ISIS integration and Conda environment.
 
 **Success Criteria (MVP):**
 - ✅ Registered GeoTIFF output (source overlaid on reference)
-- ✅ Match point CSV (500+ inliers, >10% coverage)
+- ✅ Match point CSV (300+ inliers, >10% coverage)
 - ✅ RMSE / median error on verified pair < 5 pixels
 - ✅ Code runs in <5 min per pair
-- ✅ Repeatable on CLI: `python -m lunar_isis_gui.register source.cub reference.cub`
+- ✅ Repeatable on CLI: `python -m lunar_isis_gui.register source.cub ref.cub outputs/`
 - ✅ Demo plot showing original → registered → residuals
 
 ---
 
-## 5-Day Workstreams (Assign 1 person per workstream)
+## 5-Day Sequential Plan (1 Person)
 
-### **Workstream A: Data Pipeline & PDS4 Reader (Person 1)**
-*Responsible for: .cub → Python arrays, metadata extraction, footprint clipping*
+### **Day 1 (Sept 25) — Setup & CUB Reader (4 hours)**
 
-**Day 1 (Sept 25) — 4 hours**
-1. Write `src/lunar_isis_gui/pds4_reader.py`:
-   - Load `.cub` from `data/derived/isis/` via rasterio
-   - Extract metadata: GSD, sun angles, image dims, geotransform
-   - Parse XML label for sun azimuth/elevation (XPath, like current `app.py`)
-   - Output: Python dict with `image` (NumPy array), `metadata` (geotransform, sun vector, GSD)
-   - Test on verified pair: `ch2_ohr_ncp_20260330T2317474369_d_img_d18.cub` + `m188628884lc.cub`
+**1.1 Update dependencies (30 min)**
+```bash
+# Update requirements/base.txt with:
+numpy>=2.0
+scipy>=1.10
+opencv-python>=4.8
+torch>=2.1
+matplotlib>=3.7
+scikit-learn>=1.3
+scikit-image>=0.22
+```
+Note: rasterio/GDAL NOT needed — using ISIS for .cub reading + projection instead.
 
-2. Update `requirements/base.txt`:
-   ```
-   Pillow>=10.0
-   rasterio>=1.3
-   numpy>=2.0
-   lxml>=4.9      # for XML parsing
-   ```
+**1.2 Create CUB loader via ISIS (1.5 hours)**
+Write `src/lunar_isis_gui/cub_loader.py`:
+- Function: `load_cub_with_isis(cub_path)` — uses `gdalinfo` or `gaea` (ISIS utility) to read .cub dimensions + geotransform
+- Function: `extract_cub_array(cub_path)` — convert .cub to temporary GeoTIFF via ISIS `cube2tiff` (if available) or `gdal_translate`, then read as NumPy array
+- Extract metadata: GSD, sun angles from XML labels in raw product directories (reuse XPath from `app.py`)
+- Output: dict with `image` (NumPy uint16 or float32), `metadata` (geotransform, sun vector, GSD)
+- **Test on verified pair:** Load both `ch2_ohr_ncp_20260330T2317474369_d_img_d18.cub` + `m188628884lc.cub`
 
-**Day 2 (Sept 26) — 3 hours**
-1. Write `src/lunar_isis_gui/footprint.py`:
-   - Read GeoTIFF geotransform from rasterio
-   - Find bounding box intersection (source × reference)
-   - Crop both images to overlap region
-   - Output: cropped arrays, overlap metadata
-   - Test: verify visual overlap in QGIS or matplotlib
-
-**Acceptance:** Both functions work on verified pair; no errors on import/crop.
-
----
-
-### **Workstream B: Map Projection & Alignment (Person 2)**
-*Responsible for: project reference into source coordinate system, one composed warp*
-
-**Day 1 (Sept 25) — 5 hours**
-1. Write `src/lunar_isis_gui/projection.py`:
-   - Input: cropped source + reference GeoTIFFs (from Workstream A), geotransforms
-   - Use ISIS `cam2map` (subprocess, like the GUI does) to project reference into source pixels
-   - OR use GDAL/rasterio `Warp()` directly if camera models unavailable
-   - Output: reference resampled to source grid (single Lanczos step)
-   - Fallback: if camera geometry fails, use simple affine + manual grid search (slower but always works)
-
-2. Test on verified pair:
-   - Visual check: overlay source + projected reference, look for alignment
-   - Metrics: image correlation before/after (should improve)
-
-**Day 2 (Sept 26) — 2 hours**
-1. Integrate with footprint tool
-2. Edge case: handle poles (if needed for test data; otherwise skip)
-
-**Acceptance:** Reference visually aligned to source; code runs <1 min per pair.
+**1.3 Verify ISIS integration (1 hour)**
+- Confirm `ISISROOT` + Conda env accessible
+- Test `gadalinfo`, `cube2tiff` availability
+- Fallback: if ISIS tools unavailable, use Python `gdal` bindings (already in most Conda-ISIS envs)
 
 ---
 
-### **Workstream C: Feature Matching Pipeline (Person 3, lead developer)**
-*Responsible for: the core matching algorithm, RANSAC, validation*
+### **Day 2 (Sept 26) — Projection & Footprint (4 hours)**
 
-**Day 1 (Sept 25) — 6 hours**
-1. Write `src/lunar_isis_gui/matching.py`:
-   - Input: source array, projected reference array
-   - Try LoFTR first:
-     ```python
-     from loftr import LoFTR
-     matcher = LoFTR(pretrained='outdoor')
-     kpts_src, kpts_ref, matches = matcher(source, reference)
-     ```
-   - Fallback to SIFT if LoFTR fails:
-     ```python
-     import cv2
-     sift = cv2.SIFT_create()
-     kpts_src, desc_src = sift.detectAndCompute(source, None)
-     kpts_ref, desc_ref = sift.detectAndCompute(reference, None)
-     bf = cv2.BFMatcher()
-     matches = bf.knnMatch(desc_src, desc_ref, k=2)
-     # Lowe's ratio test
-     ```
-   - Output: (N×2 array source coords, N×2 array reference coords, confidence scores)
+**2.1 Map projection via ISIS (2 hours)**
+Write `src/lunar_isis_gui/projection.py`:
+- Function: `project_reference_via_isis(source_cub, ref_cub)` → calls ISIS `cam2map` subprocess to project reference into source coordinate system
+- Alternative if `cam2map` fails: simple manual affine alignment (use image correlation to find best shift/scale)
+- Output: reference resampled to source grid as NumPy array
+- **Test:** visual overlap check (matplotlib plot overlay)
 
-2. Write `src/lunar_isis_gui/ransac.py`:
-   - Input: raw match points (source, reference)
-   - Fit affine transform: `cv2.estimateAffinePartial2D()` or `cv2.getAffineTransform()`
-   - RANSAC threshold: 3 pixels (tight for sub-pixel aim, but achievable with LoFTR)
-   - Output: inlier mask, transform matrix, residuals per point
-   - Metrics: inlier ratio, spatial coverage (% of grid cells with match)
+**2.2 Footprint & cropping (1.5 hours)**
+Write `src/lunar_isis_gui/footprint.py`:
+- Function: `crop_to_overlap(source_array, ref_array, source_metadata, ref_metadata)` → finds bbox intersection, crops both
+- Output: cropped arrays + overlap bounds
+- **Test:** verify crop is non-empty, visual check
 
-**Day 2 (Sept 26) — 4 hours**
-1. Write `src/lunar_isis_gui/validation.py`:
-   - Input: inlier points (source, reference), held-out checkpoints (random 20%)
-   - Metrics:
-     - RMSE, median, 90th percentile error on held-out points
-     - Inlier count & ratio
-     - Coverage: % of 10×10 grid with ≥1 point
-   - Output: JSON report with all metrics
-
-2. Test on verified pair; target: >400 inliers, >15% coverage, RMSE < 5 px
-
-**Acceptance:** Matching runs <2 min, produces >300 inliers, RMSE reported.
+**2.3 Integrate & test end-to-end data flow (0.5 hours)**
+- Verify: load source → project reference → crop → both valid arrays
+- **Checkpoint:** By EOD, `register.py` stub can import and chain steps 1–2 without errors
 
 ---
 
-### **Workstream D: GUI Integration & Output (Person 4, if available)**
-*Responsible for: plumbing everything into a runnable CLI, GeoTIFF/CSV output*
+### **Day 3 (Sept 27) — Feature Matching & RANSAC (5 hours)**
 
-**Day 1 (Sept 25) — 4 hours**
-1. Write `src/lunar_isis_gui/register.py` (main entry point):
-   ```python
-   import sys
-   from lunar_isis_gui.pds4_reader import load_cub
-   from lunar_isis_gui.footprint import crop_to_overlap
-   from lunar_isis_gui.projection import project_reference
-   from lunar_isis_gui.matching import match_features
-   from lunar_isis_gui.ransac import fit_transform
-   from lunar_isis_gui.validation import measure_accuracy
-   
-   def register(source_cub, reference_cub, output_dir):
-       # Pipeline: read → crop → project → match → fit → validate → save
-       # Return: results dict
-   
-   if __name__ == '__main__':
-       source, ref = sys.argv[1], sys.argv[2]
-       register(source, ref, 'outputs/')
-   ```
+**3.1 Feature matching (2 hours)**
+Write `src/lunar_isis_gui/matching.py`:
+- Function: `match_features(source_array, ref_array)` → try LoFTR, fallback to SIFT
+- LoFTR: `from loftr import LoFTR; matcher = LoFTR(pretrained='outdoor')`
+- SIFT fallback: OpenCV SIFT + BFMatcher + Lowe's ratio test (threshold 0.7)
+- Output: (N, 2) arrays for source & reference keypoint coords, plus confidence scores
+- **Target:** >100 raw matches
+- **Test:** plot keypoint matches on source + reference (matplotlib)
 
-2. Write `src/lunar_isis_gui/output.py`:
-   - Save registered GeoTIFF (source resampled to reference grid)
-   - Save match points CSV: `src_x, src_y, ref_x, ref_y, residual_x, residual_y, confidence`
-   - Save metrics JSON: `{"rmse": X, "median": Y, "ce90": Z, "inliers": N, "coverage": P}`
+**3.2 RANSAC outlier rejection (2 hours)**
+Write `src/lunar_isis_gui/ransac.py`:
+- Function: `fit_transform(source_pts, ref_pts)` → RANSAC affine via `cv2.estimateAffinePartial2D()`
+- Threshold: 3 pixels (tight but achievable with LoFTR)
+- Output: inlier mask, transform matrix (2×3), residuals per point
+- **Target:** >300 inliers, inlier ratio >30%
+- **Test:** overlay original + aligned reference (visual check)
 
-**Day 2 (Sept 26) — 3 hours**
-1. Write a simple Matplotlib plotter:
-   - 4-panel figure: original source, reference, registered overlay, residual arrows
-   - Save to PNG for PPT
-
-2. Test end-to-end on verified pair; CLI should be:
-   ```bash
-   python -m lunar_isis_gui.register data/derived/isis/ohrc/ch2_ohr_ncp_20260330T2317474369_d_img_d18.cub data/derived/isis/nac/m188628884lc.cub outputs/
-   ```
-
-**Acceptance:** CLI works, outputs exist, no crashes.
+**3.3 Validation metrics (1 hour)**
+Write `src/lunar_isis_gui/validation.py`:
+- Function: `measure_accuracy(inliers, checkpoints)` → splits 20% as hold-out, computes RMSE/median/CE90
+- Output: JSON dict with `rmse`, `median`, `ce90`, `inliers_count`, `inliers_ratio`, `coverage_pct`
+- **Test:** compute on verified pair
 
 ---
 
-### **Workstream E: Crater Detection & Landmark Fallback (Person 5, if 5-person team)**
-*Responsible for: coarse alignment via landmarks, used if feature matching fails*
+### **Day 4 (Sept 28) — Output, Plotting & Full Integration (4 hours)**
 
-**Day 1 (Sept 25) — 5 hours**
-1. Write `src/lunar_isis_gui/crater_detection.py`:
-   - Input: source image
-   - Detect craters: OpenCV Hough circle detection or simple Laplacian-of-Gaussian
-   - Filter: crater radius range 5–100 pixels (tunable)
-   - Output: list of (x, y, radius) for each crater
+**4.1 CLI orchestrator (1 hour)**
+Write `src/lunar_isis_gui/register.py`:
+```python
+def register(source_cub, ref_cub, output_dir):
+    # 1. Load + project
+    # 2. Crop to overlap
+    # 3. Match + RANSAC
+    # 4. Validate
+    # 5. Save outputs
+    # Return metrics dict
 
-2. Write `src/lunar_isis_gui/landmark_matching.py`:
-   - Build feature constellation (distance ratios, angles between craters)
-   - Match via RANSAC similarity transform
-   - Output: coarse affine transform (initial guess for feature matcher)
+if __name__ == '__main__':
+    register(sys.argv[1], sys.argv[2], sys.argv[3] or 'outputs/')
+```
 
-**Day 2 (Sept 26) — 2 hours**
-1. Integration: use landmark transform as initial guess for feature matching refinement (if available)
-2. Test on verified pair; verify craters are detected
+**4.2 Output export (1 hour)**
+Write `src/lunar_isis_gui/output.py`:
+- Save registered GeoTIFF (source warped to reference grid)
+- Save match_points.csv: `src_x, src_y, ref_x, ref_y, residual_x, residual_y`
+- Save metrics.json: `{"rmse": ..., "median": ..., "ce90": ..., "inliers": ..., "coverage": ...}`
 
-**Acceptance:** Craters detected, coarse alignment produced (visual check).
+**4.3 Visualization (1.5 hours)**
+Write `src/lunar_isis_gui/plotting.py`:
+- Function: `plot_4panel(source, ref, registered, residuals)` → 4-panel figure (original source, reference, overlay, residuals with arrows)
+- Save to PNG for PPT
 
-*Note: If 4-person team, defer Workstream E to post-demo. Fallback: feature matching alone is sufficient for MVP.*
+**4.4 Full E2E test (0.5 hours)**
+```bash
+python -m lunar_isis_gui.register data/derived/isis/ohrc/ch2_ohr_ncp_20260330T2317474369_d_img_d18.cub data/derived/isis/nac/m188628884lc.cub outputs/
+```
+- Verify all outputs exist (GeoTIFF, CSV, JSON, PNG)
+- **Target metrics by EOD:** RMSE < 10 px (refined on Day 5), >300 inliers, >10% coverage
 
 ---
 
-## Parallel Execution Timeline
+### **Day 5 (Sept 29) — Refinement & PPT (3 hours)**
+
+**5.1 Parameter tuning (1 hour)**
+- Adjust RANSAC threshold, LoFTR confidence threshold, SIFT parameters
+- Re-run on verified pair, aim for RMSE < 5 px
+- Document best-achieved metrics
+
+**5.2 Test on 2nd pair (1 hour)**
+- Re-run full pipeline on `m1185136706lc.cub` (if verified correspondence exists)
+- Verify reproducibility + metrics consistency
+
+**5.3 PPT + documentation (1 hour)**
+- Document methods: ISIS projection, LoFTR/SIFT matching, RANSAC, metrics
+- Finalize 4-panel plot + metrics table for presentation
+- Write README with CLI usage example
+- Code cleanup + comments
+
+**Acceptance:** CLI works end-to-end, RMSE achieved (or best documented), PPT ready
+
+---
+
+## Sequential Execution Timeline (1 Person)
 
 ```
-DAY 1 (Sept 25, 8 hours)
-├─ A1: PDS4 reader        [Person 1, 4h]  → source/ref arrays
-├─ B1: Projection         [Person 2, 5h]  → aligned reference
-├─ C1: LoFTR/SIFT + RANSAC [Person 3, 6h] → match points + transform
-├─ D1: CLI scaffolding    [Person 4, 4h]  → register.py stub
-└─ E1: Crater detection   [Person 5, 5h, if available] → coarse alignment
-    *Outputs integrated nightly*
+SEPT 25 (Day 1): 4 hours
+  └─ Setup + CUB loader
+     ├─ Update requirements (30 min)
+     ├─ Write cub_loader.py (1.5 hours)
+     └─ Test on verified pair (1 hour)
+     OUTPUT: Can load .cub files + extract metadata
 
-DAY 2 (Sept 26, 8 hours)
-├─ A2: Footprint clipping [Person 1, 3h]  → cropped arrays
-├─ B2: Projection + edges [Person 2, 2h]  → final projected reference
-├─ C2: Validation + metrics [Person 3, 4h] → RMSE, inliers, coverage
-├─ D2: Output + plots     [Person 4, 3h]  → GeoTIFF, CSV, PNG
-└─ E2: Landmark integration [Person 5, 2h, if available] → fallback pipeline
-    *End of day: full pipeline runnable; test on verified pair*
+SEPT 26 (Day 2): 4 hours
+  └─ Projection + Footprint
+     ├─ ISIS projection (2 hours) → projection.py
+     ├─ Footprint cropping (1.5 hours) → footprint.py
+     └─ E2E chain test (0.5 hours)
+     OUTPUT: Can load, project, crop → ready for matching
 
-DAY 3 (Sept 27, 6 hours) — REFINEMENT
-├─ All: Test end-to-end, fix bugs
-├─ All: Tune RANSAC threshold, LoFTR params on verified pair
-├─ All: Verify RMSE < 5 px, inliers > 400, coverage > 15%
-└─ All: Generate 4-panel demo plot
+SEPT 27 (Day 3): 5 hours
+  └─ Feature Matching + RANSAC
+     ├─ LoFTR/SIFT matching (2 hours) → matching.py
+     ├─ RANSAC transform fitting (2 hours) → ransac.py
+     └─ Validation metrics (1 hour) → validation.py
+     OUTPUT: Can extract features, fit transform, compute RMSE
 
-DAY 4 (Sept 28, 4 hours) — VALIDATION & DOCUMENTATION
-├─ Person 3: Test on 2nd verified pair (if available), cross-check metrics
-├─ Person 1: Document data flow, metadata extraction
-├─ Person 2: Document projection methodology
-├─ All: Write README with usage example
-└─ All: Create PPT content (methods, results, metrics)
+SEPT 28 (Day 4): 4 hours
+  └─ Output + Integration
+     ├─ CLI orchestrator (1 hour) → register.py
+     ├─ Save outputs (1 hour) → output.py
+     ├─ Plotting (1.5 hours) → plotting.py
+     └─ Full E2E test (0.5 hours)
+     OUTPUT: Full pipeline runs: python -m lunar_isis_gui.register ... 
+     TARGET: >300 inliers, RMSE ~10 px (acceptable, will refine)
 
-DAY 5 (Sept 29, 2 hours) — FINAL CHECKS & PPT
-├─ Compile results, finalize PPT
-├─ Last run-through on demo pair
-└─ Code cleanup, comments
+SEPT 29 (Day 5): 3 hours
+  └─ Refinement + PPT
+     ├─ Tune parameters (1 hour)
+     ├─ Test on 2nd pair (1 hour)
+     └─ PPT + docs (1 hour)
+     OUTPUT: RMSE < 5 px achieved, PPT ready, all metrics documented
 ```
 
 ---
 
-## Critical Files to Create / Modify
+## Critical Files to Create (7 modules + 1 config update)
 
-**New files (9 total):**
+**Modules to create (8 total, ~1000 lines of code):**
 ```
 src/lunar_isis_gui/
 ├── __init__.py                 (update version to 0.2.0)
-├── app.py                      (existing; no changes for MVP)
-├── pds4_reader.py              (NEW: load .cub, extract metadata)
-├── footprint.py                (NEW: overlap cropping)
-├── projection.py               (NEW: map projection via ISIS/GDAL)
+├── app.py                      (existing; no changes)
+├── cub_loader.py               (NEW: load .cub + extract metadata via ISIS)
+├── projection.py               (NEW: project reference via ISIS cam2map)
+├── footprint.py                (NEW: crop to overlap region)
 ├── matching.py                 (NEW: LoFTR/SIFT feature extraction)
 ├── ransac.py                   (NEW: RANSAC fitting + inlier selection)
 ├── validation.py               (NEW: RMSE, CE90, coverage metrics)
-├── crater_detection.py         (NEW: crater detection + constellation, OPTIONAL)
-├── landmark_matching.py        (NEW: landmark constellation, OPTIONAL)
 ├── output.py                   (NEW: GeoTIFF, CSV, JSON export)
-├── register.py                 (NEW: main CLI entry point)
+├── register.py                 (NEW: main CLI orchestrator)
 └── plotting.py                 (NEW: 4-panel demo figure)
 
 requirements/
-├── base.txt                    (MODIFY: add numpy, rasterio, opencv, torch, etc.)
-└── gpu.txt                     (no change; already has torch CUDA path)
+├── base.txt                    (MODIFY: add numpy, opencv, torch, scipy, etc.)
+└── gpu.txt                     (no change)
 
-outputs/                        (NEW: runtime directory for results)
+outputs/                        (NEW: runtime directory)
 ├── registered.tiff
 ├── match_points.csv
 ├── metrics.json
 └── demo.png
 ```
 
+**Key simplification:** No rasterio/GDAL/complex projection. Instead:
+- Use ISIS `cam2map` (subprocess) for projection (like existing GUI does)
+- Use `cube2tiff` or `gdal_translate` to convert .cub → temporary GeoTIFF
+- Use Python `gdal` bindings (included in ISIS Conda env) for array I/O
+- Use existing app.py XPath logic to extract sun angles from XML labels
+
 **Unchanged:**
-- `app.py` (existing GUI) — keep as Phase 1; don't alter
-- `data/` (raw/derived) — only read from
-- `docs/` — add results to PPT separately
+- `app.py` (Phase 1 GUI, off-limits)
+- `data/` (read-only)
+- `docs/` (reference only)
 
 ---
 
@@ -360,24 +336,24 @@ matplotlib>=3.7
 
 ## Next Steps
 
-1. **Assign workstreams** to team members (A, B, C, D, E)
-2. **Create Git branches:** `feature/workstream-A`, `feature/workstream-B`, etc.
-3. **Daily standup:** 30 min sync, report blockers
-4. **Nightly integration:** merge working code; test full pipeline
-5. **Code review:** each PR reviewed before merge
+1. **Start with Day 1:** Update requirements.txt, create cub_loader.py
+2. **Daily targets:** Complete each day's modules in order (Days 1-5)
+3. **Test EOD:** Each day ends with end-to-end test (can import all modules)
+4. **Save & commit:** Commit working code after each day
+5. **Adapt as needed:** If any module takes longer, adjust next day's scope
 
 ---
 
 ## Team Roles
 
-| Person | Workstream | Modules | Start Time |
-|--------|-----------|---------|-----------|
-| 1 | A: Data Pipeline | `pds4_reader.py`, `footprint.py` | Sept 25, 8 AM |
-| 2 | B: Projection | `projection.py` | Sept 25, 8 AM |
-| 3 | C: Feature Matching (Lead) | `matching.py`, `ransac.py`, `validation.py` | Sept 25, 8 AM |
-| 4 | D: CLI & Output | `register.py`, `output.py`, `plotting.py` | Sept 25, 8 AM |
-| 5 | E: Landmarks (Optional) | `crater_detection.py`, `landmark_matching.py` | Sept 25, 8 AM |
+## Execution Notes (1 Person)
 
+- **No parallelization:** Follow Days 1-5 sequence
+- **No team coordination:** Work solo, run E2E test at end of each day
+- **ISIS subprocess pattern:** Copy from existing `app.py` for projection + format conversion
+- **Error handling:** Implement graceful fallbacks (e.g., SIFT if LoFTR fails, affine if ISIS fails)
+- **Minimal UI:** CLI only; save PPT plots at end
+- **Testing strategy:** Test on verified OHRC/NAC pair at end of Day 2, refinements Days 3-5
 ---
 
 **Plan locked. Ready to code!**

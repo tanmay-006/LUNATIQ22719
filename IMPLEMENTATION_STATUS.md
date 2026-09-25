@@ -1,63 +1,61 @@
 # LunaReg Implementation Status Tracker
 
 **Last Updated:** Sept 25, 2026 · **Days Remaining:** 5 (until Sept 30)  
-**Team Size:** 3-5 people · **Status:** Implementation Starting
+**Team Size:** 1 person (solo) · **Status:** Implementation Starting
 
 ---
 
 ## Workstream Assignment & Progress
 
-| Workstream | Person | Lead? | Status | Day 1 Target | Day 2 Target |
-|---|---|---|---|---|---|
-| **A: Data Pipeline** | Person 1 | — | 🔴 NOT STARTED | `pds4_reader.py` + `requirements/base.txt` | `footprint.py` |
-| **B: Projection** | Person 2 | — | 🔴 NOT STARTED | `projection.py` + test | Integration + edge cases |
-| **C: Feature Matching** | Person 3 | ⭐ YES | 🔴 NOT STARTED | `matching.py` + `ransac.py` | `validation.py` + metrics |
-| **D: CLI & Output** | Person 4 | — | 🔴 NOT STARTED | `register.py` + `output.py` | `plotting.py` + E2E test |
-| **E: Landmarks** | Person 5 | — | 🔴 NOT STARTED | `crater_detection.py` + `landmark_matching.py` | Integration (OPTIONAL) |
+## Daily Progress Tracking
 
+| Day | Target Modules | Hours | Status | Blockers | Notes |
+|---|---|---|---|---|---|
+| **Sept 25 (Day 1)** | cub_loader.py, requirements | 4 | 🔴 NOT STARTED | — | Setup + load .cub files |
+| **Sept 26 (Day 2)** | projection.py, footprint.py, matching.py, ransac.py, validation.py | 4 | ⏳ WAITING FOR DAY 1 | — | Core pipeline |
+| **Sept 27 (Day 3)** | register.py, output.py, plotting.py | 4 | ⏳ WAITING FOR DAY 2 | — | Integration + CLI |
+| **Sept 28 (Day 4)** | Parameter tuning, 2nd pair validation | 3 | ⏳ WAITING FOR DAY 3 | — | Refinement |
+| **Sept 29 (Day 5)** | PPT + docs, code cleanup | 2 | ⏳ WAITING FOR DAY 4 | — | Final prep |
 ---
 
 ## File Checklist (13 modules to create + 1 config update)
 
-### Requirements
-- [ ] Update `requirements/base.txt` — add numpy, rasterio, lxml, opencv, torch, scipy, scikit-image, scikit-learn, matplotlib
+### Day 1 (Sept 25) — Setup + CUB Loader
+- [ ] Update `requirements/base.txt` — add numpy, opencv, torch, scipy, scikit-image, scikit-learn, matplotlib (remove rasterio/GDAL)
+- [ ] Create `src/lunar_isis_gui/cub_loader.py` (~150 lines)
+  - `load_cub_with_isis(path)` → loads .cub via ISIS commands, extracts metadata
+  - `extract_cub_array(path)` → convert .cub → temp GeoTIFF → NumPy array
+  - Test on verified pair: `ch2_ohr_ncp_20260330T2317474369_d_img_d18.cub` + `m188628884lc.cub`
 
-### Workstream A: Data Pipeline (Person 1)
-- [ ] Create `src/lunar_isis_gui/pds4_reader.py` (~120 lines)
-  - `load_cub(path)` → loads .cub via rasterio, extracts metadata
-  - Test on verified pair
-- [ ] Create `src/lunar_isis_gui/footprint.py` (~80 lines)
-  - `crop_to_overlap(source_dict, reference_dict)` → finds bbox intersection, crops both images
-
-### Workstream B: Projection (Person 2)
+### Day 2 (Sept 26) — Projection, Footprint, Feature Matching
 - [ ] Create `src/lunar_isis_gui/projection.py` (~150 lines)
-  - `project_reference(source_dict, reference_dict)` → project ref to source grid via ISIS or GDAL
-  - Test on verified pair, visual check alignment
-
-### Workstream C: Feature Matching (Person 3)
+  - `project_reference_via_isis(source_cub, ref_cub)` → use ISIS `cam2map` subprocess
+  - Fallback: simple affine alignment if ISIS unavailable
+  - Test: visual overlap check
+- [ ] Create `src/lunar_isis_gui/footprint.py` (~80 lines)
+  - `crop_to_overlap(source_arr, ref_arr, source_meta, ref_meta)` → find & crop intersection
 - [ ] Create `src/lunar_isis_gui/matching.py` (~200 lines)
-  - `match_features(source, reference)` → LoFTR + SIFT fallback
-  - Returns raw match points + confidence scores
+  - `match_features(source, reference)` → LoFTR primary, SIFT fallback
 - [ ] Create `src/lunar_isis_gui/ransac.py` (~100 lines)
-  - `fit_transform(source_pts, ref_pts)` → RANSAC affine, outlier rejection
-  - Returns inliers, transform matrix, residuals
+  - `fit_transform(source_pts, ref_pts)` → RANSAC affine, returns inliers + transform
 - [ ] Create `src/lunar_isis_gui/validation.py` (~120 lines)
-  - `measure_accuracy(inliers, checkpoints)` → RMSE, median, CE90, coverage metrics
-  - Returns JSON report with all metrics
+  - `measure_accuracy(inliers, checkpoints)` → RMSE, median, CE90, coverage
 
-### Workstream D: CLI & Output (Person 4)
+### Day 3 (Sept 27) — CLI Integration, Output, Plotting
 - [ ] Create `src/lunar_isis_gui/register.py` (~100 lines)
-  - Main orchestrator: read → crop → project → match → fit → validate → save
+  - Main orchestrator: load → project → crop → match → RANSAC → validate → save
   - CLI: `python -m lunar_isis_gui.register source.cub ref.cub outputs/`
 - [ ] Create `src/lunar_isis_gui/output.py` (~80 lines)
-  - `save_results(...)` → GeoTIFF, CSV match points, JSON metrics
+  - Save: registered GeoTIFF, match_points CSV, metrics JSON
 - [ ] Create `src/lunar_isis_gui/plotting.py` (~150 lines)
-  - `plot_4panel(source, ref, registered, residuals)` → save PNG for PPT
+  - `plot_4panel(source, ref, registered, residuals)` → PNG for PPT
+- [ ] Update `src/lunar_isis_gui/__init__.py` → version 0.2.0
+- [ ] Full E2E test on verified OHRC/NAC pair
 
-### Workstream E: Landmarks (Person 5, OPTIONAL)
-- [ ] Create `src/lunar_isis_gui/crater_detection.py` (~120 lines)
-  - `detect_craters(image)` → Hough circles + filter by radius
-  - Returns list of (x, y, radius)
+### Days 4-5 — Refinement & PPT (Optional modules)
+- [ ] `src/lunar_isis_gui/crater_detection.py` — (OPTIONAL if time permits)
+- [ ] `src/lunar_isis_gui/landmark_matching.py` — (OPTIONAL if time permits)
+- [ ] PPT content + documentation
 - [ ] Create `src/lunar_isis_gui/landmark_matching.py` (~150 lines)
   - `match_craters(craters_src, craters_ref)` → constellation graph + RANSAC
   - Returns coarse affine transform
