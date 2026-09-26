@@ -100,11 +100,12 @@ class IsisLauncher(tk.Tk):
         self.last_output: Path | None = None
         self.registration_source = tk.StringVar()
         self.registration_references: list[Path] = []
-        self.registration_output = tk.StringVar(value="/tmp/lunareg-gui")
+        self.registration_output = tk.StringVar(value=str(ROOT / "outputs" / "lunareg-gui"))
         self.registration_method = tk.StringVar(value="sift")
         self.registration_projection = tk.StringVar(value="auto")
         self.registration_max_dimension = tk.StringVar(value="1024")
         self.registration_status = tk.StringVar(value="Ready for registration")
+        self.registration_batch_root = Path(self.registration_output.get())
         self.registration_stage = tk.StringVar(value="Waiting to start")
         self.registration_preview: tk.PhotoImage | None = None
         self.active_registration_output: Path | None = None
@@ -311,15 +312,22 @@ class IsisLauncher(tk.Tk):
         self.registration_status.set("Running...")
         self.registration_stage.set("Starting registration batch")
         self.write_log("\n=== Visual registration batch ===\n")
+        self.registration_batch_root = Path(self.registration_output.get())
         self.worker = threading.Thread(
             target=self.run_registration_batch,
-            args=(Path(self.registration_source.get()), list(self.registration_references), max_dimension),
+            args=(
+                Path(self.registration_source.get()),
+                list(self.registration_references),
+                max_dimension,
+                self.registration_batch_root,
+            ),
             daemon=True,
         )
         self.worker.start()
 
-    def run_registration_batch(self, source: Path, references: list[Path], max_dimension: int) -> None:
-        batch_root = Path("/tmp/lunareg-gui")
+    def run_registration_batch(
+        self, source: Path, references: list[Path], max_dimension: int, batch_root: Path
+    ) -> None:
         batch_root.mkdir(parents=True, exist_ok=True)
         for reference in references:
             output = batch_root / reference.stem
@@ -459,7 +467,7 @@ class IsisLauncher(tk.Tk):
                 elif kind == "reg_start":
                     self.registration_stage.set(f"Running {value}")
                     self.registration_status.set(f"Processing {value}")
-                    self.active_registration_output = Path("/tmp/lunareg-gui") / value
+                    self.active_registration_output = self.registration_batch_root / value
                     self.set_stage(0)
                 elif kind == "reg_log":
                     self.write_log(value)

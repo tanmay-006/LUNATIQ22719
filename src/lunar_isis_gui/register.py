@@ -73,13 +73,17 @@ def _resize_pair(source: np.ndarray, reference: np.ndarray, max_dimension: int) 
     scale = min(1.0, max_dimension / float(longest))
     if scale >= 1.0:
         return source, reference, 1.0
-    size = (
+    source_size = (
         max(1, int(round(source.shape[1] * scale))),
         max(1, int(round(source.shape[0] * scale))),
     )
+    reference_size = (
+        max(1, int(round(reference.shape[1] * scale))),
+        max(1, int(round(reference.shape[0] * scale))),
+    )
     return (
-        cv2.resize(source, size, interpolation=cv2.INTER_AREA),
-        cv2.resize(reference, size, interpolation=cv2.INTER_AREA),
+        cv2.resize(source, source_size, interpolation=cv2.INTER_AREA),
+        cv2.resize(reference, reference_size, interpolation=cv2.INTER_AREA),
         scale,
     )
 
@@ -241,7 +245,6 @@ def register(
         matches["reference_points"],
         matches["confidence"],
         fit["inlier_mask"],
-        result,
     )
     plot_4panel(
         source_overlap,

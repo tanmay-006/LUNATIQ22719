@@ -128,6 +128,17 @@ def project_reference_via_isis(
         projected = _affine_fallback(source["image"], reference["image"])
     metadata = dict(reference["metadata"])
     metadata["dimensions"] = (source_shape[1], source_shape[0])
+    # The projected image is resampled onto the source's pixel grid, so its
+    # geotransform/pixel scale must come from the source, not the reference.
+    source_metadata = source["metadata"]
+    if "geotransform" in source_metadata:
+        metadata["geotransform"] = source_metadata["geotransform"]
+    else:
+        metadata.pop("geotransform", None)
+    if "gsd" in source_metadata:
+        metadata["gsd"] = source_metadata["gsd"]
+    else:
+        metadata.pop("gsd", None)
     return {
         "image": np.asarray(projected),
         "metadata": metadata,

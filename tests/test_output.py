@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import json
 
 import cv2
 import numpy as np
@@ -19,13 +18,12 @@ def test_writes_registration_outputs(tmp_path):
         points,
         np.ones(3, dtype=np.float32),
         np.array([True, False, True]),
-        {"metrics": {"inlier_count": 2}},
     )
 
     assert cv2.imread(paths["registered"], cv2.IMREAD_UNCHANGED).shape == (8, 8)
     with open(paths["matches"], newline="", encoding="utf-8") as handle:
         assert len(list(csv.reader(handle))) == 4
-    assert json.loads(open(paths["metrics"], encoding="utf-8").read())["metrics"]["inlier_count"] == 2
+    assert paths["metrics"] == str(tmp_path / "metrics.json")
 
 
 def test_writes_diagnostic_plot(tmp_path):

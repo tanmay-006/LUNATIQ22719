@@ -12,7 +12,7 @@ def test_resize_pair_bounds_longest_dimension() -> None:
     resized_source, resized_reference, scale = _resize_pair(source, reference, 120)
 
     assert resized_source.shape == (80, 40)
-    assert resized_reference.shape == (80, 40)
+    assert resized_reference.shape == (40, 120)
     assert scale == 0.4
 
 
