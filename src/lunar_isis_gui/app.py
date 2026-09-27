@@ -13,6 +13,8 @@ from tkinter import filedialog, messagebox, ttk
 
 import cv2
 
+from .register import DEFAULT_MAX_DIMENSION
+
 ROOT = Path(__file__).resolve().parents[2]
 DERIVED_ROOT = ROOT / "data" / "derived" / "isis"
 
@@ -103,7 +105,7 @@ class IsisLauncher(tk.Tk):
         self.registration_output = tk.StringVar(value=str(ROOT / "outputs" / "lunareg-gui"))
         self.registration_method = tk.StringVar(value="sift")
         self.registration_projection = tk.StringVar(value="auto")
-        self.registration_max_dimension = tk.StringVar(value="1024")
+        self.registration_max_dimension = tk.StringVar(value=str(DEFAULT_MAX_DIMENSION))
         self.registration_status = tk.StringVar(value="Ready for registration")
         self.registration_batch_root = Path(self.registration_output.get())
         self.registration_stage = tk.StringVar(value="Waiting to start")
@@ -302,11 +304,12 @@ class IsisLauncher(tk.Tk):
             messagebox.showwarning("Select products", "Choose one OHRC source and at least one NAC reference.")
             return
         try:
-            max_dimension = int(self.registration_max_dimension.get())
-            if max_dimension <= 0:
+            dimension_text = self.registration_max_dimension.get().strip()
+            max_dimension = int(dimension_text) if dimension_text else DEFAULT_MAX_DIMENSION
+            if max_dimension < 0:
                 raise ValueError
         except ValueError:
-            messagebox.showerror("Invalid dimension", "Max dimension must be a positive integer.")
+            messagebox.showerror("Invalid dimension", "Max dimension must be zero or a positive integer.")
             return
         self.registration_button.configure(state="disabled")
         self.registration_status.set("Running...")
@@ -326,7 +329,7 @@ class IsisLauncher(tk.Tk):
         self.worker.start()
 
     def run_registration_batch(
-        self, source: Path, references: list[Path], max_dimension: int, batch_root: Path
+        self, source: Path, references: list[Path], max_dimension: int | None, batch_root: Path
     ) -> None:
         batch_root.mkdir(parents=True, exist_ok=True)
         for reference in references:
@@ -335,7 +338,8 @@ class IsisLauncher(tk.Tk):
                 sys.executable, "-m", "lunar_isis_gui.register", str(source), str(reference), str(output),
                 "--projection-method", self.registration_projection.get(),
                 "--method", self.registration_method.get(),
-                "--max-dimension", str(max_dimension), "--save-intermediates",
+                "--max-dimension", str(max_dimension),
+                "--save-intermediates",
             ]
             environment = os.environ.copy()
             source_root = str(ROOT / "src")
@@ -495,8 +499,13 @@ class IsisLauncher(tk.Tk):
                     elif (output / "04_matches.png").is_file():
                         self.update_preview(output / "04_matches.png")
                     status = "accepted" if payload["code"] == 0 else "rejected"
+                    if payload["code"] != 0:
+                        self.registration_status.set(
+                            f"{payload['reference']} failed (exit {payload['code']})"
+                        )
                     self.write_log(f"[{payload['reference']}] {status}; checkpoints: {output}\n")
                 elif kind == "reg_error":
+                    self.registration_status.set("Registration process could not start")
                     self.write_log(f"Registration process error: {value}\n")
                 elif kind == "reg_batch_done":
                     self.registration_button.configure(state="normal")

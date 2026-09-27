@@ -13,12 +13,14 @@ import numpy as np
 
 from .cub_loader import load_cub_with_isis
 from .footprint import crop_to_overlap
-from .matching import match_features
+from .matching import match_features, select_uniform_matches
 from .output import write_intermediates, write_registration_outputs
 from .plotting import plot_4panel, plot_matches, plot_ransac, plot_stage_pair
 from .projection import project_reference_via_isis
 from .ransac import fit_transform
 from .validation import measure_accuracy
+
+DEFAULT_MAX_DIMENSION = 2048
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -55,8 +57,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-dimension",
         type=int,
-        default=1024,
-        help="resize overlap to this maximum side length before matching (default: 1024)",
+        default=DEFAULT_MAX_DIMENSION,
+        help=(
+            "maximum side length before matching "
+            f"(default: {DEFAULT_MAX_DIMENSION}; use 0 for native dimensions)"
+        ),
     )
     parser.add_argument(
         "--save-intermediates",
@@ -66,7 +71,11 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resize_pair(source: np.ndarray, reference: np.ndarray, max_dimension: int) -> tuple[np.ndarray, np.ndarray, float]:
+def _resize_pair(
+    source: np.ndarray, reference: np.ndarray, max_dimension: int | None
+) -> tuple[np.ndarray, np.ndarray, float]:
+    if max_dimension in (None, 0):
+        return source, reference, 1.0
     if max_dimension <= 0:
         raise ValueError("max_dimension must be positive")
     longest = max(source.shape[0], source.shape[1], reference.shape[0], reference.shape[1])
@@ -97,20 +106,22 @@ def register(
     ratio: float,
     ransac_threshold: float,
     projection_method: str,
-    max_dimension: int,
+    max_dimension: int | None,
     save_intermediates: bool = False,
 ) -> dict[str, object]:
     """Run registration and write the registered raster, matches, and metrics."""
 
+    effective_max_dimension = None if max_dimension in (None, 0) else max_dimension
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"[1/6] Loading source cube: {source_path}", flush=True)
-    source = load_cub_with_isis(source_path, max_dimension=max_dimension)
+    source = load_cub_with_isis(source_path, max_dimension=effective_max_dimension)
     print(f"[2/6] Projecting reference cube: {reference_path}", flush=True)
     projected = project_reference_via_isis(
         source_path,
         reference_path,
         use_cam2map=projection_method == "auto",
-        max_dimension=max_dimension,
+        max_dimension=effective_max_dimension,
+        source_product=source,
     )
     print(f"      projection method: {projected['method']}", flush=True)
     if projected["projection_error"]:
@@ -125,7 +136,7 @@ def register(
     source_overlap, reference_overlap, scale = _resize_pair(
         overlap["source"],
         overlap["reference"],
-        max_dimension,
+        effective_max_dimension,
     )
     if scale < 1.0:
         print(
@@ -169,6 +180,7 @@ def register(
         method=method,
         ratio_threshold=ratio,
     )
+    matches = select_uniform_matches(matches, source_overlap.shape)
     count = matches["source_points"].shape[0]
     if matches.get("warning"):
         print(f"      matcher notice: {matches['warning']}", flush=True)
@@ -231,7 +243,7 @@ def register(
         "projection_method": projected["method"],
         "projection_error": projected["projection_error"],
         "matching_method": matches["method"],
-        "max_dimension": max_dimension,
+        "max_dimension": effective_max_dimension,
         "resize_scale": scale,
         "transform": matrix.tolist(),
         "metrics": dict(metrics),

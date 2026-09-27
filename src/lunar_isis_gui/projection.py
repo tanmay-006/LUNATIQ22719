@@ -12,7 +12,13 @@ from typing import TypedDict
 import cv2
 import numpy as np
 
-from .cub_loader import CubLoaderError, CubMetadata, extract_cub_array, load_cub_with_isis
+from .cub_loader import (
+    CubLoaderError,
+    CubMetadata,
+    CubProduct,
+    extract_cub_array,
+    load_cub_with_isis,
+)
 
 
 class ProjectedReference(TypedDict):
@@ -55,7 +61,11 @@ def _affine_fallback(source: np.ndarray, reference: np.ndarray) -> np.ndarray:
         (source_shape[1], source_shape[0]),
         interpolation=cv2.INTER_AREA,
     )
-    source_small = cv2.resize(_normalise(source), (min(1024, source_shape[1]), min(1024, source_shape[0])))
+    working_side = 2048
+    source_small = cv2.resize(
+        _normalise(source),
+        (min(working_side, source_shape[1]), min(working_side, source_shape[0])),
+    )
     reference_small = cv2.resize(resized, (source_small.shape[1], source_small.shape[0]))
     shift, _ = cv2.phaseCorrelate(source_small, reference_small)
     matrix = np.float32([[1, 0, shift[0]], [0, 1, shift[1]]])
@@ -110,10 +120,11 @@ def project_reference_via_isis(
     *,
     use_cam2map: bool = True,
     max_dimension: int | None = None,
+    source_product: CubProduct | None = None,
 ) -> ProjectedReference:
     """Return a reference image on the source grid, using ISIS or affine fallback."""
 
-    source = load_cub_with_isis(source_cub, max_dimension=max_dimension)
+    source = source_product or load_cub_with_isis(source_cub, max_dimension=max_dimension)
     reference = load_cub_with_isis(ref_cub, max_dimension=max_dimension)
     source_shape = source["image"].shape[-2:]
     projection_error = None

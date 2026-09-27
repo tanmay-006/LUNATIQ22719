@@ -173,6 +173,10 @@ def extract_cub_array(
 ) -> np.ndarray:
     """Convert an ISIS cube to a temporary TIFF and return its pixel array."""
 
+    if max_dimension == 0:
+        max_dimension = None
+    elif max_dimension is not None and max_dimension < 0:
+        raise ValueError("max_dimension must be zero or positive")
     path = Path(cub_path).expanduser().resolve()
     if not path.is_file():
         raise FileNotFoundError(f"CUB file does not exist: {path}")

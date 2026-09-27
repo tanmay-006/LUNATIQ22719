@@ -1,0 +1,11 @@
+version: 1
+spec: docs/problem-statement-26166.md
+requirements:
+  - id: REQ-001
+    plan_items: [2.1]
+  - id: REQ-002
+    plan_items: [2.1, 3.1]
+  - id: REQ-003
+    plan_items: [3.1]
+  - id: REQ-004
+    plan_items: [1.1, 3.1]

@@ -13,4 +13,5 @@ source "$CONDA_SH"
 if [[ "${CONDA_DEFAULT_ENV:-}" != "isis" ]]; then
     conda activate isis
 fi
-exec python "$ROOT_DIR/src/lunar_isis_gui/app.py" "$@"
+export PYTHONPATH="${ROOT_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}"
+exec python -m lunar_isis_gui.app "$@"

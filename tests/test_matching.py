@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from lunar_isis_gui.matching import match_features
+from lunar_isis_gui.matching import FeatureMatches, match_features, select_uniform_matches
 
 
 def _pattern() -> np.ndarray:
@@ -74,6 +74,46 @@ def test_loftr_missing_dependency_falls_back_to_sift(monkeypatch):
 
     assert matches["method"] == "sift"
     assert "LoFTR is unavailable" in matches["warning"]
+
+
+def test_uniform_selection_keeps_highest_confidence_per_grid_cell():
+    matches: FeatureMatches = {
+        "source_points": np.array([[5, 5], [6, 6], [75, 5], [5, 75]], dtype=np.float32),
+        "reference_points": np.array([[1, 1], [2, 2], [3, 3], [4, 4]], dtype=np.float32),
+        "confidence": np.array([0.4, 0.9, 0.8, 0.7], dtype=np.float32),
+        "method": "sift",
+    }
+
+    selected = select_uniform_matches(matches, (80, 80), grid_shape=(2, 2))
+
+    np.testing.assert_allclose(selected["source_points"], [[6, 6], [75, 5], [5, 75]])
+    np.testing.assert_allclose(selected["confidence"], [0.9, 0.8, 0.7])
+
+
+def test_uniform_selection_preserves_empty_match_contract():
+    matches: FeatureMatches = {
+        "source_points": np.empty((0, 2), dtype=np.float32),
+        "reference_points": np.empty((0, 2), dtype=np.float32),
+        "confidence": np.empty((0,), dtype=np.float32),
+        "method": "sift",
+    }
+
+    selected = select_uniform_matches(matches, (20, 20))
+
+    assert selected["source_points"].shape == (0, 2)
+    assert selected["reference_points"].shape == (0, 2)
+
+
+def test_uniform_selection_rejects_misaligned_confidence():
+    matches: FeatureMatches = {
+        "source_points": np.zeros((2, 2), dtype=np.float32),
+        "reference_points": np.zeros((2, 2), dtype=np.float32),
+        "confidence": np.zeros((1,), dtype=np.float32),
+        "method": "sift",
+    }
+
+    with pytest.raises(ValueError, match="one value per point"):
+        select_uniform_matches(matches, (20, 20))
 
 
 if __name__ == "__main__":

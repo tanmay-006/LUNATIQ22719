@@ -16,9 +16,20 @@ def test_resize_pair_bounds_longest_dimension() -> None:
     assert scale == 0.4
 
 
-def test_parser_uses_safe_large_cube_defaults() -> None:
+def test_parser_uses_safe_high_resolution_default() -> None:
     args = _parser().parse_args(["source.cub", "reference.cub", "outputs"])
 
     assert args.projection_method == "fallback"
-    assert args.max_dimension == 1024
+    assert args.max_dimension == 2048
     assert args.method == "sift"
+
+
+def test_resize_pair_preserves_native_dimensions_with_zero_limit() -> None:
+    source = np.zeros((200, 100), dtype=np.uint8)
+    reference = np.zeros((100, 300), dtype=np.uint8)
+
+    resized_source, resized_reference, scale = _resize_pair(source, reference, 0)
+
+    assert resized_source is source
+    assert resized_reference is reference
+    assert scale == 1.0

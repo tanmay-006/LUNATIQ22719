@@ -16,6 +16,75 @@ class FeatureMatches(TypedDict):
     warning: NotRequired[str]
 
 
+def select_uniform_matches(
+    matches: FeatureMatches,
+    image_shape: tuple[int, int],
+    *,
+    grid_shape: tuple[int, int] = (8, 8),
+    min_source_distance: float = 0.0,
+) -> FeatureMatches:
+    """Keep the strongest match from each source-image grid cell.
+
+    Candidates are considered in descending confidence order. This prevents a
+    dense, repetitive region from displacing weaker correspondences elsewhere
+    in the image while preserving point-array alignment.
+    """
+
+    source_points = np.asarray(matches["source_points"], dtype=np.float32)
+    reference_points = np.asarray(matches["reference_points"], dtype=np.float32)
+    confidence = np.asarray(matches["confidence"], dtype=np.float32)
+    if source_points.ndim != 2 or source_points.shape[1] != 2:
+        raise ValueError("source_points must have shape (N, 2)")
+    if reference_points.shape != source_points.shape:
+        raise ValueError("reference_points must have the same shape as source_points")
+    if confidence.shape != (source_points.shape[0],):
+        raise ValueError("confidence must contain one value per point pair")
+    if not np.isfinite(source_points).all() or not np.isfinite(reference_points).all():
+        raise ValueError("match points must contain only finite values")
+    if not np.isfinite(confidence).all():
+        raise ValueError("confidence must contain only finite values")
+
+    height, width = image_shape
+    rows, columns = grid_shape
+    if height <= 0 or width <= 0 or rows <= 0 or columns <= 0:
+        raise ValueError("image_shape and grid_shape dimensions must be positive")
+    if min_source_distance < 0:
+        raise ValueError("min_source_distance must not be negative")
+    if source_points.shape[0] == 0:
+        return {
+            **matches,
+            "source_points": source_points,
+            "reference_points": reference_points,
+            "confidence": confidence,
+        }
+
+    order = np.argsort(-confidence, kind="stable")
+    selected: list[int] = []
+    occupied_cells: set[tuple[int, int]] = set()
+    for index in order:
+        x, y = source_points[index]
+        column = min(columns - 1, max(0, int(x * columns / width)))
+        row = min(rows - 1, max(0, int(y * rows / height)))
+        cell = (row, column)
+        if cell in occupied_cells:
+            continue
+        if min_source_distance and any(
+            np.linalg.norm(source_points[index] - source_points[chosen]) < min_source_distance
+            for chosen in selected
+        ):
+            continue
+        occupied_cells.add(cell)
+        selected.append(int(index))
+
+    selected_indices = np.asarray(selected, dtype=np.intp)
+    return {
+        **matches,
+        "source_points": source_points[selected_indices],
+        "reference_points": reference_points[selected_indices],
+        "confidence": confidence[selected_indices],
+    }
+
+
 def _normalise(image: np.ndarray) -> np.ndarray:
     array = np.asarray(image, dtype=np.float32)
     finite = np.isfinite(array)

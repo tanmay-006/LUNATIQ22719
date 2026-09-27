@@ -80,9 +80,10 @@ PYTHONPATH=src python -m lunar_isis_gui.register \
 The command prints progress and writes `registered.tif`, `matches.csv`, and
 `metrics.json`, plus a `diagnostic.png` four-panel summary, under the output
 directory. Use `--method auto` to try LoFTR
-before falling back to SIFT. For large cubes, `--max-dimension 1024` (the
-default) downsamples during GDAL conversion, before pixels are loaded into
-Python; this avoids allocating the original multi-gigabyte rasters. Use
+before falling back to SIFT. The default limits the working side to 2048
+pixels to avoid exhausting memory on large cubes. Pass `--max-dimension N`
+for a different bound, or `--max-dimension 0` to request native dimensions
+(which may require substantial memory). Use
 `--projection-method auto` to attempt ISIS `cam2map`, or the default
 `fallback` for the local affine/phase-correlation approximation. The fallback
 is useful for pipeline diagnostics but is not a substitute for camera-model
@@ -93,6 +94,11 @@ The CLI rejects runs with too few matches, duplicate keypoint assignments, or
 rank-deficient point geometry, too few inliers, or a low inlier ratio instead
 of writing a misleading registration image. This is expected for low-texture
 or insufficiently overlapping inputs.
+Before RANSAC, accepted correspondences are ranked by matcher confidence and
+limited to the strongest point in each cell of an 8x8 source-image grid. This
+reduces over-representation from repetitive terrain and improves spatial
+coverage; it does not make a fallback projection scientifically valid or
+guarantee sub-pixel accuracy by itself.
 When `--projection-method auto` prints an ISIS error such as
 `Unable to find PVL group [Instrument]`, the input is not a camera-model-
 initialized ISIS cube. Re-import the original PDS product with the matching
