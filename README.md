@@ -12,7 +12,7 @@ Research workspace for illumination-aware registration between Chandrayaan-2 OHR
 - `config/isis/` - ISIS project configuration
 - `requirements/` - Python dependency sets
 - `tools/installers/` - local installation scripts
-
+.
 ## ISIS
 
 Activate the installed ISIS environment:
